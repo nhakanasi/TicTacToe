@@ -1,4 +1,5 @@
-from encode import Board, Cell, Result, BOARD_ROWS, BOARD_COLS, BOARD_SIZE, WIN
+from strat.encode import Board, Cell, Result
+from strat.config import BOARD_ROWS, BOARD_COLS, BOARD_SIZE, WIN
 def outcome_score(result: Result, root_symbol: Cell) -> int:
     if result == Result.Draw:
         return 0

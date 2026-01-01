@@ -1,477 +1,411 @@
 """
-Temporal-Difference Learning for Tic Tac Toe using Linear Value Function
-V(s) = W^T * X(s) where X(s) is a feature vector representing board state
-
-Implementation follows the pseudocode from the paper:
-- Collect training examples (feature vectors and target values)
-- Apply LMS (Least Mean Squares) rule to update weights
-- Use bootstrapping: V_train(b) = R + γ * V_hat(next_board)
-
-Based on the approach in https://arxiv.org/pdf/2212.12252
+Gomoku AI with Negamax Algorithm and Alpha-Beta Pruning
+Uses existing Board class from board.py with custom encoder
 """
 
 import numpy as np
-import pickle
-import os
 from typing import List, Tuple, Optional
-try:
-    from .encode import Board, Cell, Result, BOARD_ROWS, BOARD_COLS, WIN
-except ImportError:
-    from encode import Board, Cell, Result, BOARD_ROWS, BOARD_COLS, WIN
+import time
+from dataclasses import dataclass
+from strat.config import BOARD_ROWS, BOARD_COLS, WIN, BOARD_SIZE
+from strat.encode import Board, Cell, Result
 
 
-class TDTicTacToe:
-    """
-    Temporal-Difference learning agent for Tic Tac Toe.
-    Value function: V(s) = W^T * X(s)
+# Score Constants
+EVAL_WIN_BASE = 1_000_000_000
+EVAL_MIN = -EVAL_WIN_BASE - 100
+EVAL_MAX = EVAL_WIN_BASE + 100
+
+# Heuristic Scores
+SCORE_OPEN_4 = 100_000_000
+SCORE_CLOSED_4 = 5_000_000
+SCORE_OPEN_3 = 1_000_000
+SCORE_CLOSED_3 = 10_000
+SCORE_OPEN_2 = 5_000
+SCORE_CLOSED_2 = 100
+SCORE_OPEN_1 = 10
+
+
+@dataclass
+class PlayRange:
+    """Tracks the active play area for optimization"""
+    min_r: int
+    max_r: int
+    min_c: int
+    max_c: int
     
-    Uses LMS rule for weight updates based on training examples collected from game trajectory.
-    """
-    
-    def __init__(self, learning_rate=0.1, discount_factor=0.99):
-        """
-        Initialize the TD learning agent.
-        
-        Args:
-            learning_rate: Learning rate for LMS updates (alpha)
-            discount_factor: Discount factor for future rewards (gamma)
-        """
-        self.learning_rate = learning_rate
-        self.discount_factor = discount_factor
-        self.symbol = None
-        
-        # Initialize weights
-        self.num_features = self._count_sequences()
-        self.weights = np.zeros(self.num_features)
-        
-        # For tracking game history during training
-        self.state_history = []
-        self.feature_history = []
+    def update(self, row: int, col: int) -> None:
+        """Expand range to include new move with 2-cell margin"""
+        self.min_r = max(0, min(self.min_r, row - 2))
+        self.max_r = min(BOARD_ROWS - 1, max(self.max_r, row + 2))
+        self.min_c = max(0, min(self.min_c, col - 2))
+        self.max_c = min(BOARD_COLS - 1, max(self.max_c, col + 2))
+
+
+class BoardEncoder:
+    """Custom board encoder for neural network input or state representation"""
     
     @staticmethod
-    def _count_sequences() -> int:
-        """Count total number of sequences in board using existing logic."""
-        count = 0
-        # Horizontal sequences
-        count += BOARD_ROWS * (BOARD_COLS - WIN + 1)
-        # Vertical sequences
-        count += BOARD_COLS * (BOARD_ROWS - WIN + 1)
-        # Diagonal sequences
-        count += (BOARD_ROWS - WIN + 1) * (BOARD_COLS - WIN + 1)
-        # Anti-diagonal sequences
-        count += (BOARD_ROWS - WIN + 1) * (BOARD_COLS - WIN + 1)
-        return count
+    def encode_board(board: Board, current_player: Cell = None) -> np.ndarray:
+        """
+        Encode board state into multi-channel representation
+        Returns: 4-channel array (BOARD_ROWS, BOARD_COLS, 4)
+        - Channel 0: Current player pieces (1 where player has piece, 0 otherwise)
+        - Channel 1: Opponent pieces (1 where opponent has piece, 0 otherwise)
+        - Channel 2: Empty cells (1 where empty, 0 otherwise)
+        - Channel 3: Current player indicator (all 1s if X, all 0s if O)
+        """
+        encoded = np.zeros((BOARD_ROWS, BOARD_COLS, 4), dtype=np.float32)
+        
+        cells_2d = board.visualize()
+        
+        # Determine current player from move count if not specified
+        if current_player is None:
+            num_moves = np.count_nonzero(board.cells)
+            current_player = Cell.X if num_moves % 2 == 0 else Cell.O
+        
+        # Channel 0: Current player's pieces
+        encoded[:, :, 0] = (cells_2d == current_player).astype(np.float32)
+        
+        # Channel 1: Opponent's pieces
+        opponent = Cell.O if current_player == Cell.X else Cell.X
+        encoded[:, :, 1] = (cells_2d == opponent).astype(np.float32)
+        
+        # Channel 2: Empty cells
+        encoded[:, :, 2] = (cells_2d == Cell.Empty).astype(np.float32)
+        
+        # Channel 3: Current player indicator
+        encoded[:, :, 3] = 1.0 if current_player == Cell.X else 0.0
+        
+        return encoded
     
-    def extract_features(self, board: Board) -> np.ndarray:
+    @staticmethod
+    def encode_1d(board: Board, current_player: Cell = None) -> np.ndarray:
         """
-        Extract feature vector from board state using Board.get_rows_cols_and_diagonals().
-        
-        Features represent the "potential" of each sequence:
-        - Positive features for X-favorable patterns (X present, O absent)
-        - Negative features for O-favorable patterns (O present, X absent)
-        - Zero for blocked/empty patterns
-        
-        Args:
-            board: Current board state
-            
-        Returns:
-            Feature vector of shape (num_sequences,)
+        Simple 1D encoding from current player's perspective
+        Returns: Flattened array where 1=current player, -1=opponent, 0=empty
         """
-        sequences = board.get_rows_cols_and_diagonals()
-        features = np.zeros(len(sequences))
+        cells = board.cells.copy()
         
-        for i, seq_sum in enumerate(sequences):
-            # Sequence sum ranges from -WIN to +WIN
-            # Positive sum: X-favorable (contains X, no O)
-            # Negative sum: O-favorable (contains O, no X)
-            # Zero: empty or blocked sequence
-            
-            if seq_sum > 0:
-                # X-favorable: scale by number of X's
-                features[i] = seq_sum / WIN  # Normalize to [0, 1)
-            elif seq_sum < 0:
-                # O-favorable: scale by number of O's
-                features[i] = seq_sum / WIN  # Normalize to [-1, 0)
-            else:
-                # Empty sequence
-                features[i] = 0
+        if current_player is None:
+            num_moves = np.count_nonzero(board.cells)
+            current_player = Cell.X if num_moves % 2 == 0 else Cell.O
         
-        return features
+        if current_player == Cell.O:
+            cells = -cells  # Flip perspective
+        return cells
     
-    def value(self, board: Board) -> float:
+    @staticmethod
+    def get_symmetries(board: Board) -> List[np.ndarray]:
         """
-        Compute value of a board state using V(s) = W^T * X(s).
+        Generate all 8 symmetric transformations of the board
+        Returns list of board states
+        """
+        symmetries = []
+        cells_2d = board.visualize()
         
-        Args:
-            board: Board state
-            
-        Returns:
-            Estimated value (scalar)
-        """
-        features = self.extract_features(board)
-        return np.dot(self.weights, features)
+        # 4 rotations
+        for k in range(4):
+            rotated = np.rot90(cells_2d, k)
+            symmetries.append(rotated.flatten())
+        
+        # Mirror + 4 rotations
+        mirrored = np.fliplr(cells_2d)
+        for k in range(4):
+            rotated = np.rot90(mirrored, k)
+            symmetries.append(rotated.flatten())
+        
+        return symmetries
+
+
+class GameState:
+    """Wrapper for Board with move history and play range optimization"""
     
-    def set_symbol(self, symbol: int):
-        """Set the player symbol (Cell.X or Cell.O)."""
-        self.symbol = symbol
+    def __init__(self):
+        self.board = Board()
+        self.move_history = []
+        self.play_ranges = [PlayRange(
+            max(0, BOARD_ROWS // 2 - 2),
+            min(BOARD_ROWS - 1, BOARD_ROWS // 2 + 2),
+            max(0, BOARD_COLS // 2 - 2),
+            min(BOARD_COLS - 1, BOARD_COLS // 2 + 2)
+        )]  # Start center-ish
     
-    def reset(self):
-        """Reset game history for new game."""
-        self.state_history = []
-        self.feature_history = []
+    def _index_to_coords(self, idx: int) -> Tuple[int, int]:
+        """Convert 1D index to 2D coordinates"""
+        return idx // BOARD_COLS, idx % BOARD_COLS
     
-    def act(self, board: Board) -> Optional[int]:
-        """
-        Choose action using greedy policy: best(legalmoves(b)).
-        Selects move that maximizes V_hat(b) for current weights.
-        
-        Args:
-            board: Current board state
-            
-        Returns:
-            Action (1D index of move), or None if no valid moves
-        """
-        valid_moves = board.get_valid_moves()
-        
-        if not valid_moves:
-            return None
-        
-        # Greedy action selection: choose move that maximizes value
-        best_move = None
-        best_value = -np.inf
-        
-        for move in valid_moves:
-            next_board = board.act(move, self.symbol)
-            move_value = self.value(next_board)
-            
-            if move_value > best_value:
-                best_value = move_value
-                best_move = move
-        
-        return best_move
+    def get_current_player(self) -> Cell:
+        """Determine current player from move count"""
+        num_moves = len(self.move_history)
+        return Cell.X if num_moves % 2 == 0 else Cell.O
     
-    def act_with_exploration(self, board: Board, epsilon: float = 0.1) -> Optional[int]:
-        """
-        Choose action with epsilon-greedy exploration.
+    def make_move(self, move: int) -> None:
+        """Make a move and update play range"""
+        symbol = self.get_current_player()
+        self.board = self.board.act(move, symbol)
+        self.move_history.append(move)
         
-        Args:
-            board: Current board state
-            epsilon: Probability of exploring (random action)
-            
-        Returns:
-            Action (1D index of move), or None if no valid moves
-        """
-        valid_moves = board.get_valid_moves()
-        
-        if not valid_moves:
-            return None
-        
-        # Epsilon-greedy: explore with probability epsilon
-        if np.random.random() < epsilon:
-            return np.random.choice(valid_moves)
-        
-        # Otherwise use greedy policy
-        return self.act(board)
+        # Update play range
+        row, col = self._index_to_coords(move)
+        new_range = PlayRange(
+            self.play_ranges[-1].min_r,
+            self.play_ranges[-1].max_r,
+            self.play_ranges[-1].min_c,
+            self.play_ranges[-1].max_c
+        )
+        new_range.update(row, col)
+        self.play_ranges.append(new_range)
     
-    def record_state(self, board: Board):
-        """Record board state and features for later training."""
-        features = self.extract_features(board)
-        self.state_history.append(board)
-        self.feature_history.append(features)
-    
-    def update_from_game(self, final_reward: float):
-        """
-        Update weights using LMS (Least Mean Squares) rule following the paper's pseudocode.
-        
-        Algorithm:
-        1. Collect all training examples: (featureV_i, V_train_i)
-        2. For intermediate states: V_train(b_i) = 0 + γ * V_hat(b_{i+1})
-        3. For final state: V_train(b_final) = final_reward
-        4. Apply LMS update rule to all examples:
-           W ← W + α * (V_train(b) - V_hat(b)) * featureV
-        
-        Args:
-            final_reward: Final game result (+1 win, 0 draw, -1 loss)
-                         Already adjusted for agent's perspective
-        """
-        if not self.feature_history:
+    def undo_move(self) -> None:
+        """Undo the last move"""
+        if not self.move_history:
             return
         
-        # Step 1-2: Build training examples with bootstrapped targets
-        training_examples = []
+        move = self.move_history.pop()
+        self.play_ranges.pop()
         
-        # Process intermediate states (all but last)
-        for t in range(len(self.feature_history) - 1):
-            features_t = self.feature_history[t]
-            
-            # V_train(b_t) = r + γ * V_hat(b_{t+1})
-            # where r = 0 for intermediate steps
-            v_next = np.dot(self.weights, self.feature_history[t + 1])
-            v_train = 0.0 + self.discount_factor * v_next
-            
-            training_examples.append((features_t, v_train))
+        # Reconstruct board from history
+        self.board = Board()
+        for m in self.move_history:
+            num_moves = np.count_nonzero(self.board.cells)
+            symbol = Cell.X if num_moves % 2 == 0 else Cell.O
+            self.board = self.board.act(m, symbol)
+    
+    def get_ordered_moves(self) -> List[int]:
+        """Get legal moves ordered by likelihood (moves near existing pieces first)"""
+        valid_moves = self.board.get_valid_moves()
         
-        # Process final state
-        if len(self.feature_history) > 0:
-            features_final = self.feature_history[-1]
-            # V_train(b_final) = final_reward (no next state)
-            v_train_final = final_reward
-            training_examples.append((features_final, v_train_final))
+        if not self.move_history:
+            return valid_moves
         
-        # Step 3: Apply LMS rule to all training examples
-        # For each training example: W ← W + α * (V_train(b) - V_hat(b)) * featureV
-        for features, v_train in training_examples:
-            # Calculate current estimate V_hat(b)
-            v_hat = np.dot(self.weights, features)
-            
-            # Calculate error
-            error = v_train - v_hat
-            
-            # Update rule (LMS): W ← W + α * error * featureV
-            self.weights += self.learning_rate * error * features
-    
-    def save(self, path: str):
-        """Save learned weights to file."""
-        os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-        with open(path, 'wb') as f:
-            pickle.dump(self.weights, f)
-    
-    def load(self, path: str):
-        """Load learned weights from file."""
-        with open(path, 'rb') as f:
-            self.weights = pickle.load(f)
-    
-    def get_weights(self) -> np.ndarray:
-        """Get copy of current weights."""
-        return self.weights.copy()
-    
-    def set_weights(self, weights: np.ndarray):
-        """Set weights directly."""
-        self.weights = weights.copy()
+        play_range = self.play_ranges[-1]
+        
+        # Filter moves within play range
+        range_moves = []
+        for move in valid_moves:
+            r, c = self._index_to_coords(move)
+            if (play_range.min_r <= r <= play_range.max_r and 
+                play_range.min_c <= c <= play_range.max_c):
+                range_moves.append(move)
+        
+        # Sort: moves with neighbors first
+        def has_neighbor(idx: int) -> bool:
+            r, c = self._index_to_coords(idx)
+            board_2d = self.board.visualize()
+            for dr in [-1, 0, 1]:
+                for dc in [-1, 0, 1]:
+                    if dr == 0 and dc == 0:
+                        continue
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < BOARD_ROWS and 0 <= nc < BOARD_COLS:
+                        if board_2d[nr, nc] != Cell.Empty:
+                            return True
+            return False
+        
+        range_moves.sort(key=lambda m: not has_neighbor(m))
+        return range_moves if range_moves else valid_moves
 
 
-class TDTrainer:
+def is_valid_pos(r: int, c: int) -> bool:
+    """Check if position is within board bounds"""
+    return 0 <= r < BOARD_ROWS and 0 <= c < BOARD_COLS
+
+
+def evaluate(game_state: GameState) -> int:
     """
-    Trainer implementing the paper's training pseudocode.
-    
-    Input: numTrainingSamples(n)
-    Output: targetweightVector(W), numAgentWins(nW), numAgentLoss(nL), numAgentDraws(nD)
+    Evaluate board position from current player's perspective
+    Higher score means better for current player
     """
+    score_x = 0
+    score_o = 0
     
-    def __init__(self, agent_x: TDTicTacToe, agent_o: TDTicTacToe):
-        """
-        Initialize trainer with two agents.
-        
-        Args:
-            agent_x: TD learning agent for X
-            agent_o: TD learning agent for O
-        """
-        self.agent_x = agent_x
-        self.agent_o = agent_o
-        self.agent_x.set_symbol(Cell.X)
-        self.agent_o.set_symbol(Cell.O)
-        
-        # Output statistics
-        self.num_wins = 0      # nW: agent X wins
-        self.num_losses = 0    # nL: agent X losses
-        self.num_draws = 0     # nD: agent X draws
+    board_2d = game_state.board.visualize()
+    directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
     
-    def play_game(self, epsilon: float = 0.1) -> Result:
-        board = Board()
-        self.agent_x.reset()
-        self.agent_o.reset()
-        
-        agents = [self.agent_x, self.agent_o]
-        current_idx = 0
-        
-        # Play game until terminal state
-        while True:
-            current_agent = agents[current_idx]
+    for r in range(BOARD_ROWS):
+        for c in range(BOARD_COLS):
+            cell_type = board_2d[r, c]
+            if cell_type == Cell.Empty:
+                continue
             
-            # Line 5: featureV = extractFeatures(board)
-            current_agent.record_state(board)
-            
-            # Line 3: Choose best(legalmoves(b)) using current W
-            if epsilon > 0:
-                move = current_agent.act_with_exploration(board, epsilon)
-            else:
-                move = current_agent.act(board)
-            
-            if move is None:
-                break
-            
-            # Execute move
-            board = board.act(move, current_agent.symbol)
-            
-            # Check game end
-            result = board.isEnd()
-            if result != Result.Incomplete:
-                break
-            
-            # Switch player
-            current_idx = 1 - current_idx
-        
-        # Line 8: Calculate utility value of final board state
-        # Line 11: Increment game status counts
-        if result == Result.X_Wins:
-            x_reward = 1.0
-            o_reward = -1.0
-            self.num_wins += 1
-        elif result == Result.O_Wins:
-            x_reward = -1.0
-            o_reward = 1.0
-            self.num_losses += 1
-        else:  # Draw
-            x_reward = 0.0
-            o_reward = 0.0
-            self.num_draws += 1
-        
-        # Line 12-18: Update W for all training examples using LMS rule
-        self.agent_x.update_from_game(x_reward)
-        self.agent_o.update_from_game(o_reward)
-        
-        return result
+            for dr, dc in directions:
+                # Skip if previous cell in this direction has same type (avoid double counting)
+                prev_r, prev_c = r - dr, c - dc
+                if is_valid_pos(prev_r, prev_c) and board_2d[prev_r, prev_c] == cell_type:
+                    continue
+                
+                # Count consecutive pieces
+                count = 0
+                curr_r, curr_c = r, c
+                while is_valid_pos(curr_r, curr_c) and board_2d[curr_r, curr_c] == cell_type:
+                    count += 1
+                    curr_r += dr
+                    curr_c += dc
+                
+                # Count open ends
+                open_ends = 0
+                if is_valid_pos(prev_r, prev_c) and board_2d[prev_r, prev_c] == Cell.Empty:
+                    open_ends += 1
+                if is_valid_pos(curr_r, curr_c) and board_2d[curr_r, curr_c] == Cell.Empty:
+                    open_ends += 1
+                
+                # Score this pattern
+                current_score = 0
+                if count >= WIN:
+                    current_score = EVAL_WIN_BASE
+                elif count == WIN - 1:
+                    current_score = SCORE_OPEN_4 if open_ends == 2 else (SCORE_CLOSED_4 if open_ends == 1 else 0)
+                elif count == WIN - 2:
+                    current_score = SCORE_OPEN_3 if open_ends == 2 else (SCORE_CLOSED_3 if open_ends == 1 else 0)
+                elif count == WIN - 3:
+                    current_score = SCORE_OPEN_2 if open_ends == 2 else (SCORE_CLOSED_2 if open_ends == 1 else 0)
+                elif count == 1 and open_ends == 2:
+                    current_score = SCORE_OPEN_1
+                
+                if cell_type == Cell.X:
+                    score_x += current_score
+                else:
+                    score_o += current_score
     
-    def train(self, num_training_samples: int = 1000, epsilon_start: float = 0.2,
-              epsilon_end: float = 0.01, epsilon_decay: float = 0.995,
-              eval_interval: int = 100):
-        """
-        Train both agents following paper's pseudocode with exploration decay.
+    # Return from current player's perspective
+    current_player = game_state.get_current_player()
+    if current_player == Cell.X:
+        return score_x - score_o
+    return score_o - score_x
+
+
+def negamax(game_state: GameState, depth: int, alpha: int, beta: int) -> int:
+    """
+    Negamax algorithm with alpha-beta pruning
+    Returns evaluation score from current player's perspective
+    """
+    # Check for winner
+    result = game_state.board.isEnd()
+    if result != Result.Incomplete:
+        if result == Result.Draw:
+            return 0
+        # Current player has lost (opponent just won)
+        return -(EVAL_WIN_BASE + depth)
+    
+    # Terminal depth
+    if depth == 0:
+        return evaluate(game_state)
+    
+    moves = game_state.get_ordered_moves()
+    if not moves:
+        return 0  # Draw
+    
+    max_eval = EVAL_MIN
+    for move in moves:
+        game_state.make_move(move)
+        eval_score = -negamax(game_state, depth - 1, -beta, -alpha)
+        game_state.undo_move()
         
-        Input: numTrainingSamples(n)
-        Output: targetweightVector(W), numAgentWins(nW), numAgentLoss(nL), numAgentDraws(nD)
+        max_eval = max(max_eval, eval_score)
+        alpha = max(alpha, eval_score)
         
-        Initialisation: W=[0.5,0.5,0.5,0.5,0.5,0.5,0.5], trainGamesCount = 0,
-        nW = nL = nD = 0
+        if alpha >= beta:
+            break  # Beta cutoff
+    
+    return max_eval
+
+
+def get_best_move(game_state: GameState, depth: int = 4) -> Tuple[int, int]:
+    """
+    Find the best move using negamax with alpha-beta pruning
+    Returns: (move_index, evaluation_score)
+    """
+    moves = game_state.get_ordered_moves()
+    if not moves:
+        return BOARD_SIZE // 2, 0
+    
+    best_move = moves[0]
+    max_eval = EVAL_MIN
+    alpha = EVAL_MIN
+    beta = EVAL_MAX
+    
+    print(f"Thinking (Depth {depth})... ", end="", flush=True)
+    start_time = time.time()
+    
+    for move in moves:
+        game_state.make_move(move)
+        eval_score = -negamax(game_state, depth - 1, -beta, -alpha)
+        game_state.undo_move()
         
-        Line 1: while trainGamesCount != n do
-        Line 2-19: Play game and update weights with decaying exploration
-        Line 20: return W, nW, nL, nD
+        # Found a forced win?
+        if eval_score >= EVAL_WIN_BASE:
+            print(f"Winning move found! (Score: {eval_score})")
+            best_move = move
+            max_eval = eval_score
+            break
         
-        Args:
-            num_training_samples: n - total number of training games
-            epsilon_start: Initial exploration rate
-            epsilon_end: Minimum exploration rate (exploration floor)
-            epsilon_decay: Multiplicative decay factor per game (e.g., 0.995 = 0.5% decay)
-            eval_interval: Interval for evaluation printout
-        """
-        print("=" * 70)
-        print("TD Learning Training (Paper Pseudocode Implementation)")
-        print("=" * 70)
-        print(f"Target training games: {num_training_samples}")
-        print(f"Exploration schedule:")
-        print(f"  - Start epsilon: {epsilon_start}")
-        print(f"  - End epsilon:   {epsilon_end}")
-        print(f"  - Decay factor:  {epsilon_decay} (per game)")
-        print(f"Learning rate (alpha): {self.agent_x.learning_rate}")
-        print(f"Discount factor (gamma): {self.agent_x.discount_factor}")
-        print("=" * 70)
+        if eval_score > max_eval:
+            max_eval = eval_score
+            best_move = move
+        
+        alpha = max(alpha, eval_score)
+    
+    elapsed = (time.time() - start_time) * 1000
+    print(f"Done in {elapsed:.1f}ms. (Eval: {max_eval})")
+    
+    return best_move, max_eval
+
+
+def play_game(depth: int = 4):
+    """Main game loop for human vs AI"""
+    game_state = GameState()
+    print(f"Gomoku AI (Depth: {depth}, Board: {BOARD_ROWS}x{BOARD_COLS}, Win: {WIN})")
+    print("You are 'X'. Enter moves as 'row col' or single index.")
+    print()
+    
+    while True:
+        game_state.board.print()
         print()
         
-        # Initialize epsilon for exploration decay
-        epsilon = epsilon_start
+        result = game_state.board.isEnd()
+        if result != Result.Incomplete:
+            if result == Result.X_Wins:
+                print("Winner: Player (X)")
+            elif result == Result.O_Wins:
+                print("Winner: AI (O)")
+            else:
+                print("Draw!")
+            break
         
-        # Line 1: while trainGamesCount != n do
-        for game_num in range(num_training_samples):
-            # Line 2-19: Play game and update with current epsilon
-            self.play_game(epsilon=epsilon)
-            
-            # Decay epsilon after each game: epsilon ← max(epsilon_end, epsilon * decay)
-            epsilon = max(epsilon_end, epsilon * epsilon_decay)
-            
-            # Periodic evaluation
-            if (game_num + 1) % eval_interval == 0:
-                print(f"Games completed: {game_num + 1:5d}/{num_training_samples}")
-                print(f"  Agent X - Wins: {self.num_wins:4d}, Losses: {self.num_losses:4d}, Draws: {self.num_draws:4d}")
-                print(f"  Current epsilon: {epsilon:.6f}")
-                print(f"  Weight vector W - shape: {self.agent_x.weights.shape}")
-                print()
+        current_player = game_state.get_current_player()
         
-        print("=" * 70)
-        print("Training Complete!")
-        print(f"Final Results:")
-        print(f"  Agent X Wins:   {self.num_wins}")
-        print(f"  Agent X Losses: {self.num_losses}")
-        print(f"  Agent X Draws:  {self.num_draws}")
-        print(f"  Total games:    {self.num_wins + self.num_losses + self.num_draws}")
-        print(f"  Final epsilon:  {epsilon:.6f}")
-        print("=" * 70)
+        if current_player == Cell.X:
+            # Human player
+            while True:
+                try:
+                    user_input = input("Your move: ").strip()
+                    parts = user_input.split()
+                    
+                    if len(parts) == 1:
+                        # Single index input
+                        move = int(parts[0])
+                    elif len(parts) == 2:
+                        # Row col input
+                        r, c = map(int, parts)
+                        move = r * BOARD_COLS + c
+                    else:
+                        print("Invalid input. Enter 'row col' or index.")
+                        continue
+                    
+                    if move in game_state.board.get_valid_moves():
+                        game_state.make_move(move)
+                        break
+                    else:
+                        print("Invalid move. Try again.")
+                except (ValueError, IndexError):
+                    print("Invalid input. Enter 'row col' or index.")
+        else:
+            # AI player
+            move, eval_score = get_best_move(game_state, depth)
+            row = move // BOARD_COLS
+            col = move % BOARD_COLS
+            print(f"AI plays: {row} {col} (index: {move})")
+            game_state.make_move(move)
         
-        # Line 20: return W, nW, nL, nD
-        return (self.agent_x.weights, self.agent_o.weights,
-                self.num_wins, self.num_losses, self.num_draws)
-
-class TDPlayer:
-    """
-    Wrapper for playing games with a trained TD agent.
-    Loads weights and provides utilities for inference.
-    """
-    
-    def __init__(self, weights_path: str, symbol: int, learning_rate=0.1, discount_factor=0.99):
-        """
-        Initialize a player with trained weights.
-        
-        Args:
-            weights_path: Path to saved weights file (.pkl)
-            symbol: Player symbol (Cell.X or Cell.O)
-            learning_rate: Learning rate (for compatibility, not used in inference)
-            discount_factor: Discount factor (for compatibility, not used in inference)
-        """
-        self.agent = TDTicTacToe(learning_rate=learning_rate, discount_factor=discount_factor)
-        self.agent.set_symbol(symbol)
-        self.agent.load(weights_path)
-        self.symbol = symbol
-    
-    def get_move(self, board: Board) -> Optional[int]:
-        return self.agent.act(board)
-    
-    def get_move_with_value(self, board: Board) -> Tuple[Optional[int], float]:
-        """
-        Get best move and its value estimate.
-        
-        Args:
-            board: Current board state
-            
-        Returns:
-            Tuple of (move_index, estimated_value)
-        """
-        valid_moves = board.get_valid_moves()
-        if not valid_moves:
-            return None, 0.0
-        
-        best_move = None
-        best_value = -np.inf
-        
-        for move in valid_moves:
-            next_board = board.act(move, self.symbol)
-            move_value = self.agent.value(next_board)
-            
-            if move_value > best_value:
-                best_value = move_value
-                best_move = move
-        
-        return best_move, best_value
-
-
-
-# Example usage and testing
-if __name__ == "__main__":
-    # Initialize agents and trainer
-    agent_x = TDTicTacToe(learning_rate=0.1, discount_factor=0.99)
-    agent_o = TDTicTacToe(learning_rate=0.1, discount_factor=0.99)
-    trainer = TDTrainer(agent_x, agent_o)
-    
-    # Train agents following paper pseudocode with exploration decay
-    w_x, w_o, nw, nl, nd = trainer.train(
-        num_training_samples=100000,
-        epsilon_start=0.2,      # Start with 20% exploration
-        epsilon_end=0.01,       # End with 1% exploration (near-greedy)
-        epsilon_decay=0.995,    # Decay by 0.5% each game
-        eval_interval=100
-    )
-    
-    # Save learned weights
-    agent_x.save(r"Reinforecedment learning\tictactoe\policy\td_agent_x.pkl")
-    agent_o.save(r"Reinforecedment learning\tictactoe\policy\td_agent_o.pkl")
-    
-    print(f"\nWeights saved to: policy/td_agent_x.pkl and model/td_agent_o.pkl")
+        print()

@@ -4,9 +4,9 @@ import os
 import typing
 from math import sqrt, log2 as log
 from enum import IntEnum
-BOARD_ROWS = int(input("Rows: "))
-BOARD_COLS = int(input("Cols: "))
-WIN = int(input("Wins: "))
+
+from strat.config import BOARD_ROWS, BOARD_COLS, WIN
+
 BOARD_SIZE = BOARD_ROWS * BOARD_COLS
 PATH = f"Reinforecedment learning/tictactoe/policy/board_{BOARD_ROWS}x{BOARD_COLS}"
 C = sqrt(2)

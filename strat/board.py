@@ -2,9 +2,8 @@ import os
 from enum import IntEnum
 import numpy as np
 
-BOARD_ROWS = int(input())
-BOARD_COLS = int(input())
-WIN = int(input())
+from strat.config import BOARD_ROWS, BOARD_COLS, WIN
+
 BOARD_SIZE = BOARD_ROWS * BOARD_COLS
 PATH = f"Reinforecedment learning/tictactoe/policy/board_{BOARD_ROWS}x{BOARD_COLS}"
 C = 1.0  # Reduced from sqrt(2) for more exploitation
