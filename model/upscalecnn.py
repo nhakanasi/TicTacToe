@@ -2,62 +2,51 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-
-class ResBlock(nn.Module):
-    def __init__(self, in_chan, out_chan):
+class UpScaleCNNModel(nn.Module):
+    def __init__(self, board_rows=10, board_cols=10):
         super().__init__()
-        self.res = nn.Sequential(
-            nn.Conv2d(in_chan, 32, 3,1, "same" ),
-            nn.BatchNorm2d(),
+        
+        self.board_rows = board_rows
+        self.board_cols = board_cols
+        self.board_size = board_rows * board_cols
+        
+        # Backbone: shared convolutional layers
+        self.backbone = nn.Sequential(
+            nn.Conv2d(4, 32, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Conv2d(32, out_chan, 3,1 ,"same")
-        )
-    
-    def forward(self,x):
-        x_in = x
-        x = self.res(x)
-        return x_in + x
-
-class UpScaleCNN(nn.Module):
-    def __init__(self, in_chan, row = 10, col = 10):
-        super().__init__()
-        self.size = row * col
-
-        self.res_1 = ResBlock(64,64)
-        self.res_2 = ResBlock(128, 128)
-
-        self.features = nn.Sequential(
-            nn.Conv2d(in_chan, 64, 3, 1, "same"),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.ReLU(),
-            self.res_1,
-            nn.Conv2d(64, 128, 3, 1, "same"),
-            nn.ReLU(),
-            self.res_2,
-            nn.Conv2d(128, 128, 3, 1, "same"),
-            nn.ReLU(),
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.ReLU()
         )
         
-        self.global_pool = nn.AdaptiveAvgPool2d(1)
+        # Calculate flatten size: 128 channels * board spatial dimensions
+        flatten_size = 128 * board_rows * board_cols
         
+        # Policy head
         self.policy_head = nn.Sequential(
-            nn.Linear(128, 128),
+            nn.Conv2d(128, 4, kernel_size=1),
             nn.ReLU(),
-            nn.Linear(128, self.size)
+            nn.Flatten(),
+            nn.Linear(4 * board_rows * board_cols, 64),
+            nn.ReLU(),
+            nn.Linear(64, self.board_size),
+            nn.Softmax(dim=1)
         )
         
+        # Value head
         self.value_head = nn.Sequential(
-            nn.Linear(128, 64),
+            nn.Conv2d(128, 2, kernel_size=1),
             nn.ReLU(),
-            nn.Linear(64, 1)
+            nn.Flatten(),
+            nn.Linear(2 * board_rows * board_cols, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1),
+            nn.Tanh()
         )
     
     def forward(self, x):
-        features = self.features(x)
-        pooled = self.global_pool(features).view(x.size(0), -1)
-        
-        policy_logits = self.policy_head(pooled)
-        policy = torch.softmax(policy_logits, dim=1)
-        
-        value = torch.tanh(self.value_head(pooled))
-        
+        x = self.backbone(x)
+        policy = self.policy_head(x)
+        value = self.value_head(x)
         return policy, value
