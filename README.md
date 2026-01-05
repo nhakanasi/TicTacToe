@@ -30,7 +30,7 @@ python train_gomoku_alphago.py --rows 10 --cols 10 --win 5 --iterations 20
 
 ## Features
 
-- **Multiple AI Agents**: MCTS, Minimax, Alpha-Beta, Heuristic, Q-Table, TD Learning, Neural MCTS
+- **Multiple AI Agents**: MCTS, MCTS-Shared, Minimax, Alpha-Beta, Heuristic, Q-Table, TD Learning, Neural MCTS (AlphaGo)
 - **Flexible Board Sizes**: Any grid size (e.g., 3x3, 5x5, 10x10, 15x15)
 - **Customizable Win Conditions**: 3-in-a-row, 4-in-a-row, 5-in-a-row (Gomoku), etc.
 - **Any Matchup**: Human vs AI, AI vs AI, or even Human vs Human
@@ -43,12 +43,13 @@ python train_gomoku_alphago.py --rows 10 --cols 10 --win 5 --iterations 20
 |-------|-------------|----------|-------------------|----------|
 | `human` | Human player via CLI | N/A | No | - |
 | `mcts` | Monte Carlo Tree Search | Strong | No | All sizes |
+| `mcts-shared` | MCTS with shared tree | Strong | Optional | 3x3 (can save/load) |
 | `alphabeta` | Alpha-beta pruning minimax | Medium-Strong | No | Small-Medium |
 | `minimax` | Pure minimax search | Medium | No | Small boards |
 | `heuristic` | Negamax with heuristics | Medium | No | Medium-Large |
 | `qtable` | Q-learning table-based | Varies | Yes | Small (3x3) |
 | `td` | Temporal Difference learning | Varies | Yes | Any size |
-| `Neural MCTS`| AlphaGo-style neural network | Not trained well yet | Yes | Large boards |
+| `neural-mcts` | AlphaGo-style neural network | Very Strong | Yes | Large boards (10x10+) |
 
 ## Requirements
 

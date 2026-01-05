@@ -6,7 +6,8 @@ from strat.config import set_board
 from strat.judger import Judger
 from strat.players import (
     HumanCLI, MCTSAgent, MinimaxAgent,
-    AlphaBetaAgent, HeuristicAgent, TDPolicy, QTableAgent
+    AlphaBetaAgent, HeuristicAgent, TDPolicy, QTableAgent,
+    MCTSSharedAgent, NeuralMCTSAgent
 )
 
 
@@ -19,6 +20,8 @@ AGENTS = {
     "heuristic": HeuristicAgent,
     "td": TDPolicy,
     "qtable": QTableAgent,
+    "mcts-shared": MCTSSharedAgent,
+    "neural-mcts": NeuralMCTSAgent,
 }
 
 
@@ -60,7 +63,10 @@ def main():
                          f"Available: {', '.join(AGENTS.keys())}")
     ap.add_argument("--td-model", type=str, help="Path to TD model file (required for TD player)")
     ap.add_argument("--qtable-model", type=str, help="Path to Q-table model file (for Q-table player)")
+    ap.add_argument("--mcts-shared-model", type=str, help="Path to MCTS shared tree file (for MCTS-shared)")
+    ap.add_argument("--neural-model", type=str, help="Path to neural MCTS model (for neural-mcts)")
     ap.add_argument("--mcts-iterations", type=int, default=2000, help="MCTS iterations per move")
+    ap.add_argument("--neural-simulations", type=int, default=800, help="Neural MCTS simulations per move")
     args = ap.parse_args()
 
     # Set global board configuration
@@ -83,6 +89,19 @@ def main():
             player1 = TDPolicy(model_path=args.td_model)
         elif player1_name == "qtable":
             player1 = QTableAgent(model_path=args.qtable_model, epsilon=0.0)
+        elif player1_name == "mcts-shared":
+            player1 = MCTSSharedAgent(
+                num_simulations=args.mcts_iterations,
+                model_path=args.mcts_shared_model,
+                trained_mode=bool(args.mcts_shared_model)
+            )
+        elif player1_name == "neural-mcts":
+            if not args.neural_model:
+                print("Warning: --neural-model recommended for neural-mcts player")
+            player1 = NeuralMCTSAgent(
+                model_path=args.neural_model,
+                num_simulations=args.neural_simulations
+            )
         elif player1_name == "mcts":
             player1 = MCTSAgent(iterations=args.mcts_iterations)
         else:
@@ -95,6 +114,19 @@ def main():
             player2 = TDPolicy(model_path=args.td_model)
         elif player2_name == "qtable":
             player2 = QTableAgent(model_path=args.qtable_model, epsilon=0.0)
+        elif player2_name == "mcts-shared":
+            player2 = MCTSSharedAgent(
+                num_simulations=args.mcts_iterations,
+                model_path=args.mcts_shared_model,
+                trained_mode=bool(args.mcts_shared_model)
+            )
+        elif player2_name == "neural-mcts":
+            if not args.neural_model:
+                print("Warning: --neural-model recommended for neural-mcts player")
+            player2 = NeuralMCTSAgent(
+                model_path=args.neural_model,
+                num_simulations=args.neural_simulations
+            )
         elif player2_name == "mcts":
             player2 = MCTSAgent(iterations=args.mcts_iterations)
         else:

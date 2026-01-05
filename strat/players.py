@@ -44,6 +44,27 @@ try:
 except Exception:
     QTablePlayer = None
 
+try:
+    import sys
+    import os
+    # Import MCTS shared player
+    mcts_shared_path = os.path.join(os.path.dirname(__file__), 'mcts_shared.py')
+    if os.path.exists(mcts_shared_path):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("mcts_shared", mcts_shared_path)
+        mcts_shared_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mcts_shared_module)
+        MCTSSharedPlayer = mcts_shared_module.MCTSPlayer
+    else:
+        MCTSSharedPlayer = None
+except Exception:
+    MCTSSharedPlayer = None
+
+try:
+    from strat.alpha_go_large import AlphaGoGomoku
+except Exception:
+    AlphaGoGomoku = None
+
 
 class Player(Protocol):
     symbol: Optional[Cell]
@@ -283,4 +304,92 @@ class QTableAgent:
         assert self.board is not None, "Board not set"
         self.qtable_player.set_state(self.board)
         move, _ = self.qtable_player.act()
+        return move
+
+
+class MCTSSharedAgent:
+    """MCTS with shared tree (works best for 3x3, can save/load policy)."""
+
+    def __init__(self, num_simulations: int = 5000, model_path: Optional[str] = None, 
+                 use_shared_tree: bool = True, trained_mode: bool = False) -> None:
+        if MCTSSharedPlayer is None:
+            raise ImportError("MCTS shared module not available")
+        self.symbol: Optional[Cell] = None
+        self.board: Optional[Board] = None
+        self.num_simulations = num_simulations
+        self.model_path = model_path
+        self.use_shared_tree = use_shared_tree
+        self.trained_mode = trained_mode
+        self.mcts_player = None
+
+    def reset(self) -> None:
+        if self.mcts_player:
+            self.mcts_player.reset()
+
+    def set_board(self, board: Board) -> None:
+        self.board = board
+        if self.mcts_player:
+            self.mcts_player.set_state(board)
+
+    def setSymbol(self, symbol: Cell) -> None:
+        self.symbol = symbol
+        # Initialize MCTS player
+        self.mcts_player = MCTSSharedPlayer(
+            num_sim=self.num_simulations, 
+            use_shared_tree=self.use_shared_tree,
+            trained_mode=self.trained_mode
+        )
+        self.mcts_player.setSymbol(symbol)
+        # Load policy if path provided
+        if self.model_path:
+            try:
+                self.mcts_player.load_policy()
+                print(f"Loaded MCTS shared tree policy")
+            except Exception as e:
+                print(f"Warning: Could not load MCTS policy: {e}")
+
+    def act(self) -> Optional[int]:
+        assert self.mcts_player is not None, "MCTS player not initialized; setSymbol must be called first"
+        assert self.board is not None, "Board not set"
+        self.mcts_player.set_state(self.board)
+        move = self.mcts_player.act(temperature=0.0, training=False)
+        return move
+
+
+class NeuralMCTSAgent:
+    """AlphaGo-style neural MCTS agent (for trained models on larger boards)."""
+
+    def __init__(self, model_path: Optional[str] = None, num_simulations: int = 800) -> None:
+        if AlphaGoGomoku is None:
+            raise ImportError("AlphaGo module not available")
+        self.symbol: Optional[Cell] = None
+        self.board: Optional[Board] = None
+        self.model_path = model_path
+        self.num_simulations = num_simulations
+        self.agent = None
+
+    def reset(self) -> None:
+        pass
+
+    def set_board(self, board: Board) -> None:
+        self.board = board
+
+    def setSymbol(self, symbol: Cell) -> None:
+        self.symbol = symbol
+        # Initialize agent (lazy initialization)
+        if self.agent is None:
+            try:
+                import torch
+                device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                self.agent = AlphaGoGomoku(model_path=self.model_path, device=device)
+                if self.model_path:
+                    print(f"Loaded AlphaGo neural MCTS model from {self.model_path}")
+            except Exception as e:
+                print(f"Warning: Could not load neural MCTS model: {e}")
+                raise
+
+    def act(self) -> Optional[int]:
+        assert self.agent is not None, "Neural MCTS not initialized; setSymbol must be called first"
+        assert self.board is not None, "Board not set"
+        move, _, _ = self.agent.search(self.board, num_simulations=self.num_simulations, temperature=0.0)
         return move
