@@ -11,12 +11,10 @@ import sys
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(parent_dir)
 
-from encode import Board, Cell, Result
+from strat.encode import Board, Cell, Result
+from strat import config  # Import module, not values, to get dynamic access
 from model.upscalecnn import UpScaleCNNModel
-BOARD_ROWS = 10
-BOARD_COLS = 10
-BOARD_SIZE = 100
-WIN = 5
+
 C = 4.0 
 DIRICHLET_ALPHA = 0.03
 DIRICHLET_EPSILON = 0.25
@@ -50,9 +48,13 @@ class AlphaGoGomoku:
             valid_moves = self.board.get_valid_moves()
             return len(self.children) == len(valid_moves)
     
-    def __init__(self, model_path=None, device='cpu'):
+    def __init__(self, model_path=None, device='cpu', board_rows=None, board_cols=None):
         self.device = device
-        self.model = UpScaleCNNModel(board_rows=BOARD_ROWS, board_cols=BOARD_COLS)
+        # Use explicit dimensions if provided, otherwise fall back to config
+        self.board_rows = board_rows if board_rows is not None else config.BOARD_ROWS
+        self.board_cols = board_cols if board_cols is not None else config.BOARD_COLS
+        self.board_size = self.board_rows * self.board_cols
+        self.model = UpScaleCNNModel(board_rows=self.board_rows, board_cols=self.board_cols)
         self.model.to(device)
         
         if model_path and os.path.exists(model_path):
@@ -69,11 +71,11 @@ class AlphaGoGomoku:
         current_player = Cell.X if num_moves % 2 == 0 else Cell.O
         opponent = Cell.O if current_player == Cell.X else Cell.X
         
-        # Create planes
+        # Create planes - use board_2d.shape to ensure matching dimensions
         current_layer = (board_2d == current_player).astype(np.float32)
         opponent_layer = (board_2d == opponent).astype(np.float32)
         empty_layer = (board_2d == Cell.Empty).astype(np.float32)
-        color_layer = np.ones((BOARD_ROWS, BOARD_COLS), dtype=np.float32) * (1 if current_player == Cell.X else 0)
+        color_layer = np.ones_like(board_2d, dtype=np.float32) * (1 if current_player == Cell.X else 0)
         
         state = np.stack([current_layer, opponent_layer, empty_layer, color_layer], axis=0)
         return torch.FloatTensor(state).unsqueeze(0).to(self.device)
@@ -89,14 +91,14 @@ class AlphaGoGomoku:
         
         # Mask invalid moves
         valid_moves = board.get_valid_moves()
-        policy_masked = np.full(BOARD_SIZE, -np.inf)
+        policy_masked = np.full(self.board_size, -np.inf)
         policy_masked[valid_moves] = policy[valid_moves]
         
         # Apply softmax
         policy_softmax = self._softmax(policy_masked)
         
         # Return only valid move probabilities
-        policy_valid = np.zeros(BOARD_SIZE)
+        policy_valid = np.zeros(self.board_size)
         policy_valid[valid_moves] = policy_softmax[valid_moves]
         
         return policy_valid, value
@@ -104,7 +106,18 @@ class AlphaGoGomoku:
     @staticmethod
     def _softmax(x):
         """Numerically stable softmax"""
-        x = x - np.max(x)
+        # Handle case where all values are -inf
+        max_x = np.max(x)
+        if np.isinf(max_x) and max_x < 0:
+            # All values are -inf, return uniform distribution over non-inf values
+            # This shouldn't happen in practice, but prevents NaN
+            result = np.zeros_like(x)
+            valid = ~np.isinf(x)
+            if np.any(valid):
+                result[valid] = 1.0 / np.sum(valid)
+            return result
+        
+        x = x - max_x
         e_x = np.exp(x)
         return e_x / e_x.sum()
     
@@ -126,7 +139,7 @@ class AlphaGoGomoku:
         valid_moves = node.board.get_valid_moves()
         
         noise = np.random.dirichlet([DIRICHLET_ALPHA] * len(valid_moves))
-        policy_noisy = np.zeros(BOARD_SIZE)
+        policy_noisy = np.zeros(config.BOARD_SIZE)
         policy_noisy[valid_moves] = (1 - DIRICHLET_EPSILON) * policy[valid_moves] + \
                                    DIRICHLET_EPSILON * noise
         policy = policy_noisy
@@ -192,25 +205,25 @@ class AlphaGoGomoku:
             best_move = max(valid_moves, 
                           key=lambda m: root.children[m].visit_count if m in root.children else 0)
             # Policy is one-hot for deterministic case
-            policy = np.zeros(BOARD_SIZE)
+            policy = np.zeros(config.BOARD_SIZE)
             policy[best_move] = 1.0
         else:
             # Stochastic: sample according to visit counts
             visits = np.array([root.children[m].visit_count if m in root.children else 0 
-                             for m in range(BOARD_SIZE)])
+                             for m in range(config.BOARD_SIZE)])
             visits_valid = visits.copy()
-            visits_valid[~np.array([m in valid_moves for m in range(BOARD_SIZE)])] = 0
+            visits_valid[~np.array([m in valid_moves for m in range(config.BOARD_SIZE)])] = 0
             
             # Temperature scaling
             if np.sum(visits_valid) > 0:
                 probs = np.power(visits_valid, 1.0 / temperature)
                 probs = probs / np.sum(probs)
-                best_move = np.random.choice(BOARD_SIZE, p=probs)
+                best_move = np.random.choice(config.BOARD_SIZE, p=probs)
             else:
                 best_move = np.random.choice(valid_moves)
             
             # Return policy for training
-            policy = np.zeros(BOARD_SIZE)
+            policy = np.zeros(config.BOARD_SIZE)
             for m in valid_moves:
                 if m in root.children:
                     policy[m] = (root.children[m].visit_count) ** (1.0 / temperature)
@@ -220,8 +233,9 @@ class AlphaGoGomoku:
 
 
 class AlphaGoTrainer:
-    def __init__(self, model_path=None, device='cpu'):
-        self.agent = AlphaGoGomoku(model_path=model_path, device=device)
+    def __init__(self, model_path=None, device='cpu', board_rows=None, board_cols=None):
+        self.agent = AlphaGoGomoku(model_path=model_path, device=device, 
+                                   board_rows=board_rows, board_cols=board_cols)
         self.device = device
         self.optimizer = optim.Adam(self.agent.model.parameters(), lr=0.001)
         self.replay_buffer = deque(maxlen=100000)

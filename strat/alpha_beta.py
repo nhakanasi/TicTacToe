@@ -1,5 +1,13 @@
+import os
+import sys
+
+# Add parent directory to path so this file can be run directly
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
 from strat.encode import Board, Cell, Result
-from strat.config import BOARD_ROWS, BOARD_COLS, BOARD_SIZE, WIN
+from strat import config
 def outcome_score(result: Result, root_symbol: Cell) -> int:
     if result == Result.Draw:
         return 0
@@ -50,10 +58,10 @@ def play_game():
         board.print()
         if current_player == human_symbol:
             try:
-                coord_input = input(f"Input your position (row col) [0-{BOARD_ROWS-1}] [0-{BOARD_COLS-1}]: ")
+                coord_input = input(f"Input your position (row col) [0-{config.BOARD_ROWS-1}] [0-{config.BOARD_COLS-1}]: ")
                 row, col = map(int, coord_input.split())
-                if 0 <= row < BOARD_ROWS and 0 <= col < BOARD_COLS:
-                    move = row * BOARD_COLS + col
+                if 0 <= row < config.BOARD_ROWS and 0 <= col < config.BOARD_COLS:
+                    move = row * config.BOARD_COLS + col
                     if board.isValid(move):
                         board = board.act(move, human_symbol)
                         current_player = ai_symbol
@@ -76,7 +84,7 @@ def play_game():
                     best_move = move
 
             board = board.act(best_move, ai_symbol)
-            ai_r, ai_c = divmod(best_move, BOARD_COLS)
+            ai_r, ai_c = divmod(best_move, config.BOARD_COLS)
             print(f"AI played: {ai_r} {ai_c}")
             current_player = human_symbol
 

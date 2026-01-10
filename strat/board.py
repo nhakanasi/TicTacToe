@@ -1,13 +1,23 @@
 import os
+import sys
 from enum import IntEnum
 import numpy as np
 
-from strat.config import BOARD_ROWS, BOARD_COLS, WIN
+# Add parent directory to path so this file can be run directly
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
-BOARD_SIZE = BOARD_ROWS * BOARD_COLS
-PATH = f"Reinforecedment learning/tictactoe/policy/board_{BOARD_ROWS}x{BOARD_COLS}"
+from strat import config
+
+# These are computed dynamically from config
+def get_board_size():
+    return config.BOARD_ROWS * config.BOARD_COLS
+
+def get_path():
+    return f"policy/board_{config.BOARD_ROWS}x{config.BOARD_COLS}"
+
 C = 1.0  # Reduced from sqrt(2) for more exploitation
-os.makedirs(PATH, exist_ok=True)
 
 class Cell(IntEnum):
     Empty = 0 
@@ -25,7 +35,7 @@ class Board:
         self.winner = None
         self._hash_val = None
         if cells is None:
-            self.cells = np.array([Cell.Empty] * BOARD_SIZE)
+            self.cells = np.array([Cell.Empty] * config.BOARD_SIZE)
         else:
             self.cells = cells.copy()
 
@@ -38,7 +48,7 @@ class Board:
         return hash((tuple(self.cells), player_flag))
     
     def visualize(self):
-        return self.cells.reshape(BOARD_ROWS, BOARD_COLS)
+        return self.cells.reshape(config.BOARD_ROWS, config.BOARD_COLS)
 
     def act(self, move, symbol=None):
         if symbol is None:
@@ -54,43 +64,43 @@ class Board:
 
     def print(self):
         print('\n')
-        for row in range(BOARD_ROWS):
+        for row in range(config.BOARD_ROWS):
             print('|', end="")
-            for col in range(BOARD_COLS):
+            for col in range(config.BOARD_COLS):
                 cell = self.visualize()[row][col]
                 print("{}".format(["X" if cell == Cell.X else "O" if cell == Cell.O else "."]), end="|")
-            if row < BOARD_ROWS - 1:
+            if row < config.BOARD_ROWS - 1:
                 print("\n-------------")
         print('\n')
 
     def get_valid_moves(self):
-        return [i for i in range(BOARD_SIZE) if self.cells[i] == Cell.Empty]
+        return [i for i in range(config.BOARD_SIZE) if self.cells[i] == Cell.Empty]
 
     def get_rows_cols_and_diagonals(self):
         board_2d = self.visualize()
         sequences = []
-        for i in range(BOARD_ROWS):
-            for j in range(BOARD_COLS - WIN + 1):
-                sequences.append(sum(board_2d[i, j:j+WIN]))
-        for j in range(BOARD_COLS):
-            for i in range(BOARD_ROWS - WIN + 1):
-                sequences.append(sum(board_2d[i:i+WIN, j]))
-        for i in range(BOARD_ROWS - WIN + 1):
-            for j in range(BOARD_COLS - WIN + 1):
-                sequences.append(sum(board_2d[i+k, j+k] for k in range(WIN)))
-        for i in range(BOARD_ROWS - WIN + 1):
-            for j in range(WIN - 1, BOARD_COLS):
-                sequences.append(sum(board_2d[i+k, j-k] for k in range(WIN)))
+        for i in range(config.BOARD_ROWS):
+            for j in range(config.BOARD_COLS - config.WIN + 1):
+                sequences.append(sum(board_2d[i, j:j+config.WIN]))
+        for j in range(config.BOARD_COLS):
+            for i in range(config.BOARD_ROWS - config.WIN + 1):
+                sequences.append(sum(board_2d[i:i+config.WIN, j]))
+        for i in range(config.BOARD_ROWS - config.WIN + 1):
+            for j in range(config.BOARD_COLS - config.WIN + 1):
+                sequences.append(sum(board_2d[i+k, j+k] for k in range(config.WIN)))
+        for i in range(config.BOARD_ROWS - config.WIN + 1):
+            for j in range(config.WIN - 1, config.BOARD_COLS):
+                sequences.append(sum(board_2d[i+k, j-k] for k in range(config.WIN)))
         return sequences
 
     def isEnd(self):
         sequences = self.get_rows_cols_and_diagonals()
         max_value = max(sequences)
         min_value = min(sequences)
-        if max_value == WIN:
+        if max_value == config.WIN:
             self.winner = "O wins"
             return Result.O_Wins
-        if min_value == -WIN:
+        if min_value == -config.WIN:
             self.winner = "X wins"
             return Result.X_Wins
         if not self.get_valid_moves():

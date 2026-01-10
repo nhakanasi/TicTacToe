@@ -12,7 +12,12 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'strat'))
 
 from strat.config import set_board
 from strat.encode import Board, Result
-from strat.alpha_go_large import AlphaGoTrainer
+from strat.alpha_zero_large import AlphaGoTrainer
+
+
+def log(message: str):
+    """Print with immediate flush to ensure output appears."""
+    print(message, flush=True)
 
 
 def train_alphago(
@@ -43,46 +48,55 @@ def train_alphago(
         checkpoint_dir: Directory to save checkpoints
         resume_from: Path to checkpoint to resume from (optional)
     """
-    # Set board configuration
+    # Set board configuration FIRST
     set_board(rows, cols, win)
+    
+    # Force reload of modules that cached config values
+    import importlib
+    import sys
+    if 'strat.encode' in sys.modules:
+        importlib.reload(sys.modules['strat.encode'])
+    if 'strat.alpha_zero_large' in sys.modules:
+        importlib.reload(sys.modules['strat.alpha_zero_large'])
     
     # Setup
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     os.makedirs(checkpoint_dir, exist_ok=True)
     
-    print("=" * 80)
-    print(f"AlphaGo Gomoku Training")
-    print("=" * 80)
-    print(f"Device: {device}")
-    print(f"Board: {rows}x{cols}, Win: {win} in a row")
-    print(f"Iterations: {start_iteration} to {start_iteration + num_iterations - 1}")
-    print(f"Games per iteration: {games_per_iteration}")
-    print(f"Simulations per move: {num_simulations}")
-    print(f"Training: {training_steps} steps, batch size {batch_size}")
-    print(f"Checkpoint dir: {checkpoint_dir}")
-    print("-" * 80)
+    log("=" * 80)
+    log(f"AlphaGo Gomoku Training")
+    log("=" * 80)
+    log(f"Device: {device}")
+    log(f"Board: {rows}x{cols}, Win: {win} in a row")
+    log(f"Iterations: {start_iteration} to {start_iteration + num_iterations - 1}")
+    log(f"Games per iteration: {games_per_iteration}")
+    log(f"Simulations per move: {num_simulations}")
+    log(f"Training: {training_steps} steps, batch size {batch_size}")
+    log(f"Checkpoint dir: {checkpoint_dir}")
+    log("-" * 80)
     
     # Initialize or load trainer
     if resume_from and os.path.exists(resume_from):
-        print(f"Loading checkpoint: {resume_from}")
-        trainer = AlphaGoTrainer(model_path=resume_from, device=device)
+        log(f"Loading checkpoint: {resume_from}")
+        trainer = AlphaGoTrainer(model_path=resume_from, device=device, 
+                               board_rows=rows, board_cols=cols)
     else:
         if resume_from:
-            print(f"Warning: Checkpoint not found: {resume_from}")
-        print("Starting fresh training")
-        trainer = AlphaGoTrainer(device=device)
+            log(f"Warning: Checkpoint not found: {resume_from}")
+        log("Starting fresh training")
+        trainer = AlphaGoTrainer(device=device, board_rows=rows, board_cols=cols)
     
     # Training loop
     for iteration in range(start_iteration, start_iteration + num_iterations):
-        print(f"\n{'='*80}")
-        print(f"ITERATION {iteration}/{start_iteration + num_iterations - 1}")
-        print(f"{'='*80}")
+        log(f"\n{'='*80}")
+        log(f"ITERATION {iteration}/{start_iteration + num_iterations - 1}")
+        log(f"{'='*80}")
         
         iteration_start = datetime.now()
         
         # Self-play phase
-        print(f"\nPhase 1: Self-play ({games_per_iteration} games)")
-        print("-" * 80)
+        log(f"\nPhase 1: Self-play ({games_per_iteration} games)")
+        log("-" * 80)
         
         stats = {"X": 0, "O": 0, "Draw": 0}
         
@@ -100,15 +114,15 @@ def train_alphago(
             
             trainer.replay_buffer.extend(game_data)
             
-            print(f"  Game {game_idx + 1}/{games_per_iteration}: {winner} "
+            log(f"  Game {game_idx + 1}/{games_per_iteration}: {winner} "
                   f"({len(game_data)} moves) | Buffer: {len(trainer.replay_buffer)}")
         
-        print(f"\nGame results: X wins: {stats['X']}, O wins: {stats['O']}, "
+        log(f"\nGame results: X wins: {stats['X']}, O wins: {stats['O']}, "
               f"Draws: {stats['Draw']}")
         
         # Training phase
-        print(f"\nPhase 2: Network training ({training_steps} steps)")
-        print("-" * 80)
+        log(f"\nPhase 2: Network training ({training_steps} steps)")
+        log("-" * 80)
         
         policy_losses = []
         value_losses = []
@@ -125,31 +139,31 @@ def train_alphago(
                 if policy_losses:
                     avg_p = sum(policy_losses[-100:]) / len(policy_losses[-100:])
                     avg_v = sum(value_losses[-100:]) / len(value_losses[-100:])
-                    print(f"  Step {step + 1}/{training_steps}: "
+                    log(f"  Step {step + 1}/{training_steps}: "
                           f"Policy Loss: {avg_p:.4f}, Value Loss: {avg_v:.4f}")
         
         # Summary
         if policy_losses:
             avg_policy_loss = sum(policy_losses) / len(policy_losses)
             avg_value_loss = sum(value_losses) / len(value_losses)
-            print(f"\nTraining summary:")
-            print(f"  Avg Policy Loss: {avg_policy_loss:.4f}")
-            print(f"  Avg Value Loss: {avg_value_loss:.4f}")
+            log(f"\nTraining summary:")
+            log(f"  Avg Policy Loss: {avg_policy_loss:.4f}")
+            log(f"  Avg Value Loss: {avg_value_loss:.4f}")
         
         # Save checkpoint
         checkpoint_path = os.path.join(checkpoint_dir, f'gomoku_iter_{iteration:02d}.pt')
         torch.save(trainer.agent.model.state_dict(), checkpoint_path)
-        print(f"\nCheckpoint saved: {checkpoint_path}")
+        log(f"\nCheckpoint saved: {checkpoint_path}")
         
         iteration_time = (datetime.now() - iteration_start).total_seconds() / 60
-        print(f"Iteration time: {iteration_time:.2f} minutes")
+        log(f"Iteration time: {iteration_time:.2f} minutes")
     
     # Save final model
     final_model_path = os.path.join(checkpoint_dir, 'gomoku_final.pt')
     torch.save(trainer.agent.model.state_dict(), final_model_path)
-    print(f"\n{'='*80}")
-    print(f"Training completed! Final model saved: {final_model_path}")
-    print(f"{'='*80}")
+    log(f"\n{'='*80}")
+    log(f"Training completed! Final model saved: {final_model_path}")
+    log(f"{'='*80}")
 
 
 def main():

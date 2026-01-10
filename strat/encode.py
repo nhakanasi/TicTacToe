@@ -1,16 +1,27 @@
 import numpy as np
 import pickle
 import os
+import sys
 import typing
 from math import sqrt, log2 as log
 from enum import IntEnum
 
-from strat.config import BOARD_ROWS, BOARD_COLS, WIN
+# Add parent directory to path so this file can be run directly
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
-BOARD_SIZE = BOARD_ROWS * BOARD_COLS
-PATH = f"Reinforecedment learning/tictactoe/policy/board_{BOARD_ROWS}x{BOARD_COLS}"
+from strat import config
+
+# Dynamic accessors for board dimensions - use these functions instead of constants
+def get_board_rows(): return config.BOARD_ROWS
+def get_board_cols(): return config.BOARD_COLS
+def get_win(): return config.WIN
+def get_board_size(): return config.BOARD_SIZE
+def get_path(): return f"policy/board_{config.BOARD_ROWS}x{config.BOARD_COLS}"
+
 C = sqrt(2)
-os.makedirs(PATH, exist_ok=True)
+os.makedirs(get_path(), exist_ok=True)
 
 class Cell(IntEnum):
     Empty = 0 
@@ -29,7 +40,7 @@ class Board: # State?
         self._hash_val = None
         self._canonical_cache = None  # Cache for canonical form
         if cells is None:
-            self.cells = np.array([Cell.Empty] * BOARD_SIZE)
+            self.cells = np.array([Cell.Empty] * config.BOARD_SIZE)
         else:
             self.cells = cells.copy()
 
@@ -37,7 +48,7 @@ class Board: # State?
     def all_transforms(cells_1d):
         """Generate all 8 symmetry transforms of a 1D board array."""
         xs = []
-        board_2d = cells_1d.reshape(BOARD_ROWS, BOARD_COLS)
+        board_2d = cells_1d.reshape(config.BOARD_ROWS, config.BOARD_COLS)
         
         # 4 rotations
         xs.append(board_2d.flatten())
@@ -58,30 +69,30 @@ class Board: # State?
     def transform_move_1d(move_1d, transform):
         """Apply transform to a 1D move index. transform ∈ [0..7]."""
         # Convert 1D to 2D
-        r, c = divmod(move_1d, BOARD_COLS)
+        r, c = divmod(move_1d, config.BOARD_COLS)
         
         if transform == 0:        # R0
             new_r, new_c = r, c
         elif transform == 1:      # R90
-            new_r, new_c = c, BOARD_ROWS-1-r
+            new_r, new_c = c, config.BOARD_ROWS-1-r
         elif transform == 2:      # R180
-            new_r, new_c = BOARD_ROWS-1-r, BOARD_COLS-1-c
+            new_r, new_c = config.BOARD_ROWS-1-r, config.BOARD_COLS-1-c
         elif transform == 3:      # R270
-            new_r, new_c = BOARD_COLS-1-c, r
+            new_r, new_c = config.BOARD_COLS-1-c, r
         else:
             # Mirror horizontally first: (r, c) -> (r, BOARD_COLS-1-c)
-            c = BOARD_COLS-1-c
+            c = config.BOARD_COLS-1-c
             if transform == 4:    # Mirror
                 new_r, new_c = r, c
             elif transform == 5:  # Mirror + R90
-                new_r, new_c = c, BOARD_ROWS-1-r
+                new_r, new_c = c, config.BOARD_ROWS-1-r
             elif transform == 6:  # Mirror + R180
-                new_r, new_c = BOARD_ROWS-1-r, BOARD_COLS-1-c
+                new_r, new_c = config.BOARD_ROWS-1-r, config.BOARD_COLS-1-c
             elif transform == 7:  # Mirror + R270
-                new_r, new_c = BOARD_COLS-1-c, r
+                new_r, new_c = config.BOARD_COLS-1-c, r
         
         # Convert back to 1D
-        return new_r * BOARD_COLS + new_c
+        return new_r * config.BOARD_COLS + new_c
 
     @staticmethod
     def inverse_transform_move_1d(move_1d, transform):
@@ -124,7 +135,7 @@ class Board: # State?
         return Cell.X if num_moves % 2 == 0 else Cell.O
     
     def visualize(self):
-        return self.cells.reshape(BOARD_ROWS, BOARD_COLS)
+        return self.cells.reshape(config.BOARD_ROWS, config.BOARD_COLS)
 
     def execTurn(self, index, symbol):
         self.cells[index] = symbol
@@ -155,20 +166,20 @@ class Board: # State?
     def print(self):
         print('\n')
 
-        for row in range(BOARD_ROWS):
+        for row in range(config.BOARD_ROWS):
             print('|', end="")
 
-            for col in range(BOARD_COLS):
+            for col in range(config.BOARD_COLS):
                 cell = self.visualize()[row][col]
                 print("{}".format(["X" if cell == Cell.X else "O" if cell == Cell.O else "."]), end="|")
 
-            if row < BOARD_ROWS - 1:
+            if row < config.BOARD_ROWS - 1:
                 print("\n-------------")
 
         print('\n')
 
     def isValid(self, iloc):
-        if iloc >= (BOARD_SIZE) or iloc < 0:
+        if iloc >= (config.BOARD_SIZE) or iloc < 0:
             return False
 
         if self.cells[iloc] == Cell.Empty:
@@ -177,28 +188,28 @@ class Board: # State?
         return False
     
     def get_valid_moves(self):
-        return [i for i in range(BOARD_SIZE)
+        return [i for i in range(config.BOARD_SIZE)
                 if self.cells[i] == Cell.Empty]
     
     def get_rows_cols_and_diagonals(self):
         board_2d = self.visualize()
         sequences = []
 
-        for i in range(BOARD_ROWS):
-            for j in range(BOARD_COLS - WIN + 1):
-                sequences.append(sum(board_2d[i, j:j+WIN]))
+        for i in range(config.BOARD_ROWS):
+            for j in range(config.BOARD_COLS - config.WIN + 1):
+                sequences.append(sum(board_2d[i, j:j+config.WIN]))
         
-        for j in range(BOARD_COLS):
-            for i in range(BOARD_ROWS - WIN + 1):
-                sequences.append(sum(board_2d[i:i+WIN, j]))
+        for j in range(config.BOARD_COLS):
+            for i in range(config.BOARD_ROWS - config.WIN + 1):
+                sequences.append(sum(board_2d[i:i+config.WIN, j]))
         
-        for i in range(BOARD_ROWS - WIN + 1):
-            for j in range(BOARD_COLS - WIN + 1):
-                sequences.append(sum(board_2d[i+k, j+k] for k in range(WIN)))
+        for i in range(config.BOARD_ROWS - config.WIN + 1):
+            for j in range(config.BOARD_COLS - config.WIN + 1):
+                sequences.append(sum(board_2d[i+k, j+k] for k in range(config.WIN)))
         
-        for i in range(BOARD_ROWS - WIN + 1):
-            for j in range(WIN - 1, BOARD_COLS):
-                sequences.append(sum(board_2d[i+k, j-k] for k in range(WIN)))
+        for i in range(config.BOARD_ROWS - config.WIN + 1):
+            for j in range(config.WIN - 1, config.BOARD_COLS):
+                sequences.append(sum(board_2d[i+k, j-k] for k in range(config.WIN)))
         
         return sequences
 
@@ -207,11 +218,11 @@ class Board: # State?
         max_value = max(sequences)
         min_value = min(sequences)
 
-        if max_value == WIN:
+        if max_value == config.WIN:
             self.winner = "X wins"
             return Result.X_Wins
 
-        if min_value == -WIN:
+        if min_value == -config.WIN:
             self.winner = "O wins"
             return Result.O_Wins
 

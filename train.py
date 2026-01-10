@@ -29,7 +29,7 @@ def train_neural_mcts(rows: int, cols: int, win: int, iterations: int,
     """Train a Neural Network MCTS agent (AlphaGo-style)."""
     set_board(rows, cols, win)
     try:
-        from strat.alpha_go import train_neural_mcts as train_nn
+        from strat.alpha_zero import train_neural_mcts as train_nn
         print(f"Training Neural MCTS: {rows}x{cols}, win={win}")
         print(f"Iterations: {iterations}, Games/iter: {games_per_iter}, Simulations: {simulations}")
         print(f"Output: {output_path}")

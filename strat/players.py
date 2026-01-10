@@ -1,10 +1,18 @@
 """Common player interfaces and wrappers for all strategies."""
 from __future__ import annotations
 
+import os
+import sys
 from typing import Protocol, Optional, Callable
 import numpy as np
 
-from strat.encode import Board, Cell, Result, BOARD_ROWS, BOARD_COLS
+# Add parent directory to path so this file can be run directly
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
+from strat.encode import Board, Cell, Result
+from strat import config
 from strat.mcts import MCTS
 
 try:
@@ -61,7 +69,7 @@ except Exception:
     MCTSSharedPlayer = None
 
 try:
-    from strat.alpha_go_large import AlphaGoGomoku
+    from strat.alpha_zero_large import AlphaGoGomoku
 except Exception:
     AlphaGoGomoku = None
 
@@ -104,10 +112,10 @@ class HumanCLI:
                     print("Enter row and col separated by space.")
                     continue
                 row, col = int(parts[0]), int(parts[1])
-                if row < 0 or row >= BOARD_ROWS or col < 0 or col >= BOARD_COLS:
-                    print(f"Row/col must be in [0,{BOARD_ROWS-1}]x[0,{BOARD_COLS-1}]")
+                if row < 0 or row >= config.BOARD_ROWS or col < 0 or col >= config.BOARD_COLS:
+                    print(f"Row/col must be in [0,{config.BOARD_ROWS-1}]x[0,{config.BOARD_COLS-1}]")
                     continue
-                move = row * BOARD_COLS + col
+                move = row * config.BOARD_COLS + col
                 if not self.board.isValid(move):
                     print("Cell is occupied. Try again.")
                     continue
@@ -117,10 +125,10 @@ class HumanCLI:
 
 
 class MCTSAgent:
-    def __init__(self, iterations: int = 2000) -> None:
+    def __init__(self, iterations: int = 2000, exploration_constant: float = 1.4) -> None:
         self.symbol: Optional[Cell] = None
         self.board: Optional[Board] = None
-        self.mcts = MCTS()
+        self.mcts = MCTS(exploration_constant=exploration_constant)
         self.iterations = iterations
 
     def reset(self) -> None:
@@ -245,6 +253,7 @@ class HeuristicAgent:
         self.symbol: Optional[Cell] = None
         self.board: Optional[Board] = None
         self.depth = depth
+        self.game_state = None
 
     def reset(self) -> None:
         self.game_state = None
@@ -297,7 +306,7 @@ class QTableAgent:
                 with open(self.model_path, 'rb') as f:
                     self.qtable_player.estimations = pickle.load(f)
             except FileNotFoundError:
-                print(f"Warning: Q-table model not found at {self.model_path}, using random policy")
+                pass
 
     def act(self) -> Optional[int]:
         assert self.qtable_player is not None, "Q-table player not initialized; setSymbol must be called first"
@@ -344,9 +353,8 @@ class MCTSSharedAgent:
         if self.model_path:
             try:
                 self.mcts_player.load_policy()
-                print(f"Loaded MCTS shared tree policy")
-            except Exception as e:
-                print(f"Warning: Could not load MCTS policy: {e}")
+            except Exception:
+                pass
 
     def act(self) -> Optional[int]:
         assert self.mcts_player is not None, "MCTS player not initialized; setSymbol must be called first"
@@ -367,6 +375,15 @@ class NeuralMCTSAgent:
         self.model_path = model_path
         self.num_simulations = num_simulations
         self.agent = None
+        
+        # Eagerly initialize and validate model works with current board size
+        if self.model_path:
+            import torch
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            self.agent = AlphaGoGomoku(model_path=self.model_path, device=device)
+            # Test forward pass to validate model matches current board size
+            test_board = Board()
+            self.agent.get_policy_and_value(test_board)
 
     def reset(self) -> None:
         pass
@@ -376,20 +393,9 @@ class NeuralMCTSAgent:
 
     def setSymbol(self, symbol: Cell) -> None:
         self.symbol = symbol
-        # Initialize agent (lazy initialization)
-        if self.agent is None:
-            try:
-                import torch
-                device = 'cuda' if torch.cuda.is_available() else 'cpu'
-                self.agent = AlphaGoGomoku(model_path=self.model_path, device=device)
-                if self.model_path:
-                    print(f"Loaded AlphaGo neural MCTS model from {self.model_path}")
-            except Exception as e:
-                print(f"Warning: Could not load neural MCTS model: {e}")
-                raise
 
     def act(self) -> Optional[int]:
-        assert self.agent is not None, "Neural MCTS not initialized; setSymbol must be called first"
+        assert self.agent is not None, "Neural MCTS not initialized"
         assert self.board is not None, "Board not set"
         move, _, _ = self.agent.search(self.board, num_simulations=self.num_simulations, temperature=0.0)
         return move

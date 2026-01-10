@@ -1,8 +1,25 @@
 """Shared game referee/loop."""
 from __future__ import annotations
 
-from strat.players import Player
+import os
+import sys
+from typing import Protocol, Optional
+
+# Add parent directory to path so this file can be run directly
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
 from strat.encode import Board, Result, Cell
+
+
+class Player(Protocol):
+    symbol: Cell
+    
+    def reset(self) -> None: ...
+    def setSymbol(self, symbol: Cell) -> None: ...
+    def set_state(self, state: Board) -> None: ...
+    def act(self, *args, **kwargs) -> int: ...
 
 
 class Judger:
@@ -18,8 +35,8 @@ class Judger:
         board = Board()
         self.p1.setSymbol(Cell.X)
         self.p2.setSymbol(Cell.O)
-        self.p1.set_board(board)
-        self.p2.set_board(board)
+        self.p1.set_state(board)
+        self.p2.set_state(board)
         turn = [self.p1, self.p2]
         idx = 0
 
@@ -34,8 +51,8 @@ class Judger:
                 return Result.Draw
 
             board = board.act(move, player.symbol)
-            self.p1.set_board(board)
-            self.p2.set_board(board)
+            self.p1.set_state(board)
+            self.p2.set_state(board)
 
             if print_state:
                 board.print()

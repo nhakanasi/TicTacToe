@@ -11,7 +11,8 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(parent_dir)
 
 
-from encode import Board, Cell, Result, BOARD_ROWS, BOARD_COLS, BOARD_SIZE
+from strat.encode import Board, Cell, Result
+from strat import config
 from model.simplecnn import SimpleCNN
 
 C = 4  # UCB exploration constant
@@ -76,8 +77,8 @@ class NeuralMCTS:
         # Transform policy back to original board orientation
         if transform_id != 0:
             # Convert policy to 2D for transformation
-            policy_1d = np.zeros(BOARD_SIZE)
-            for move in range(BOARD_SIZE):
+            policy_1d = np.zeros(config.BOARD_SIZE)
+            for move in range(config.BOARD_SIZE):
                 # Transform canonical move back to original board space
                 original_move = Board.inverse_transform_move_1d(move, transform_id)
                 policy_1d[original_move] = policy[move]
@@ -145,7 +146,7 @@ class NeuralMCTS:
             return
         
         # Mask invalid moves
-        policy_masked = np.zeros(BOARD_SIZE)
+        policy_masked = np.zeros(config.BOARD_SIZE)
         policy_masked[valid_moves] = policy[valid_moves]
         
         # Normalize
@@ -235,7 +236,7 @@ class NeuralMCTS:
     
     def get_action_probs(self, root, temperature=1.0):
         """Get action probabilities"""
-        visits = np.zeros(BOARD_SIZE)
+        visits = np.zeros(config.BOARD_SIZE)
         
         if len(root.children) == 0:
             print("WARNING: Root has no children!")
@@ -246,7 +247,7 @@ class NeuralMCTS:
         
         if temperature == 0:
             # Greedy
-            probs = np.zeros(BOARD_SIZE)
+            probs = np.zeros(config.BOARD_SIZE)
             best_move = np.argmax(visits)
             probs[best_move] = 1.0
         else:
@@ -254,7 +255,7 @@ class NeuralMCTS:
             if visits.sum() == 0:
                 # Fallback to uniform
                 valid_moves = list(root.children.keys())
-                probs = np.zeros(BOARD_SIZE)
+                probs = np.zeros(config.BOARD_SIZE)
                 for move in valid_moves:
                     probs[move] = 1.0 / len(valid_moves)
             else:
@@ -277,7 +278,7 @@ class NeuralMCTSPlayer:
             self.model = model
         else:
             # Initialize NEW model
-            self.model = SimpleCNN(row=BOARD_ROWS, col=BOARD_COLS, in_chan=3)
+            self.model = SimpleCNN(row=config.BOARD_ROWS, col=config.BOARD_COLS, in_chan=3)
             
             # Load weights if path provided
             if model_path and os.path.exists(model_path):
@@ -507,7 +508,7 @@ def evaluate_model(model, opponent_model=None, num_games=50, device='cpu'):
 
 def train_alphazero_style(iterations=10, games_per_iter=100, epochs_per_iter=10, device='cpu'):
     """Train using AlphaZero-style self-play"""
-    model = SimpleCNN(row=BOARD_ROWS, col=BOARD_COLS, in_chan=3).to(device)
+    model = SimpleCNN(row=config.BOARD_ROWS, col=config.BOARD_COLS, in_chan=3).to(device)
     
     print("Starting AlphaZero-style training...")
     print("=" * 50)

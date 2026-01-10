@@ -1,5 +1,14 @@
+import os
+import sys
+
+# Add parent directory to path so this file can be run directly
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
 from strat.encode import Board, Cell, Result
-from strat.config import BOARD_ROWS, BOARD_COLS, BOARD_SIZE, WIN
+from strat import config
+from strat.config import BOARD_ROWS, BOARD_COLS
 
 def outcome_score(result: Result, root_symbol: Cell) -> int:
     if result == Result.Draw:

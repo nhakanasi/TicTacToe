@@ -5,7 +5,16 @@ from math import sqrt, log
 from enum import IntEnum
 import sys
 
-from encode import Board, Cell, Result, BOARD_ROWS, BOARD_COLS, BOARD_SIZE, WIN, PATH, C
+# Add parent directory to path so this file can be run directly
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
+from strat.encode import Board, Cell, Result
+from strat import config
+
+C = sqrt(2)  # UCB exploration constant
+PATH = os.path.dirname(os.path.abspath(__file__)) 
 
 class MCTS:
     MAX_NODES = 1000000

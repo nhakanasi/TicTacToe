@@ -66,6 +66,7 @@ def main():
     ap.add_argument("--mcts-shared-model", type=str, help="Path to MCTS shared tree file (for MCTS-shared)")
     ap.add_argument("--neural-model", type=str, help="Path to neural MCTS model (for neural-mcts)")
     ap.add_argument("--mcts-iterations", type=int, default=2000, help="MCTS iterations per move")
+    ap.add_argument("--mcts-exploration", type=float, default=1.4, help="MCTS exploration constant (C in UCB formula)")
     ap.add_argument("--neural-simulations", type=int, default=800, help="Neural MCTS simulations per move")
     args = ap.parse_args()
 
@@ -103,7 +104,7 @@ def main():
                 num_simulations=args.neural_simulations
             )
         elif player1_name == "mcts":
-            player1 = MCTSAgent(iterations=args.mcts_iterations)
+            player1 = MCTSAgent(iterations=args.mcts_iterations, exploration_constant=args.mcts_exploration)
         else:
             player1 = AGENTS[player1_name]()
 
@@ -128,7 +129,7 @@ def main():
                 num_simulations=args.neural_simulations
             )
         elif player2_name == "mcts":
-            player2 = MCTSAgent(iterations=args.mcts_iterations)
+            player2 = MCTSAgent(iterations=args.mcts_iterations, exploration_constant=args.mcts_exploration)
         else:
             player2 = AGENTS[player2_name]()
 

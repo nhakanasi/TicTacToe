@@ -28,6 +28,20 @@ python train.py --agent td --rows 10 --cols 10 --win 5 --episodes 10000
 python train_gomoku_alphago.py --rows 10 --cols 10 --win 5 --iterations 20
 ```
 
+### Evaluate Agents
+
+```bash
+# Run full evaluation across all board sizes (3x3, 5x5, 10x10)
+python evaluate.py
+
+# Results are saved to result.txt with win rates and timing info
+```
+
+The evaluation script tests various agent matchups:
+- **3x3**: Q-Table, MCTS, MCTS-Shared, Minimax, AlphaBeta, TD, Heuristic
+- **5x5**: MCTS, AlphaBeta, TD, Heuristic, AlphaZero
+- **10x10**: TD vs Heuristic, AlphaZero vs Heuristic
+
 ## Features
 
 - **Multiple AI Agents**: MCTS, MCTS-Shared, Minimax, Alpha-Beta, Heuristic, Q-Table, TD Learning, Neural MCTS (AlphaGo)

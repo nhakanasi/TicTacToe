@@ -1,14 +1,23 @@
 import numpy as np
+import os
+import sys
 from math import sqrt, log
-from encode import BOARD_COLS, BOARD_SIZE, Board, Cell, WIN, Result
-C = 1.4   # UCT exploration constant
+
+# Add parent directory to path so this file can be run directly
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
+from strat.encode import Board, Cell, Result
+from strat import config
 
 
 class MCTS:
     class Node:
-        def __init__(self, board, canonical_transform=0):
+        def __init__(self, board, canonical_transform=0, exploration_constant=1.4):
             self.board = board
             self.canonical_transform = canonical_transform
+            self.exploration_constant = exploration_constant
 
             self.wins = 0
             self.draws = 0
@@ -23,16 +32,17 @@ class MCTS:
             if self.visits == 0:
                 return 1e8
             exploitation = (self.wins + 0.5 * self.draws) / self.visits
-            exploration = C * sqrt(log(parent_visits) / self.visits)
+            exploration = self.exploration_constant * sqrt(log(parent_visits) / self.visits)
             return exploitation + exploration
 
         def isFullyExpanded(self):
             valid_moves = self.board.get_valid_moves()
             return len(self.children) == len(valid_moves)
 
-    def __init__(self, max_nodes=500000):
+    def __init__(self, max_nodes=500000, exploration_constant=1.4):
         self.nodes = {}
         self.MAX_NODES = max_nodes
+        self.exploration_constant = exploration_constant
 
     # -----------------------------
     # NODE DEDUP USING CANONICAL KEY
@@ -43,8 +53,8 @@ class MCTS:
 
         if key not in self.nodes:
             if len(self.nodes) >= self.MAX_NODES:
-                return MCTS.Node(board, transform_id)  # fallback no store
-            self.nodes[key] = MCTS.Node(board, transform_id)
+                return MCTS.Node(board, transform_id, self.exploration_constant)  # fallback no store
+            self.nodes[key] = MCTS.Node(board, transform_id, self.exploration_constant)
 
         return self.nodes[key]
 

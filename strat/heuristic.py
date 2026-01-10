@@ -4,10 +4,18 @@ Uses existing Board class from board.py with custom encoder
 """
 
 import numpy as np
+import os
+import sys
 from typing import List, Tuple, Optional
 import time
 from dataclasses import dataclass
-from strat.config import BOARD_ROWS, BOARD_COLS, WIN, BOARD_SIZE
+
+# Add parent directory to path so this file can be run directly
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
+from strat import config
 from strat.encode import Board, Cell, Result
 
 
@@ -37,9 +45,9 @@ class PlayRange:
     def update(self, row: int, col: int) -> None:
         """Expand range to include new move with 2-cell margin"""
         self.min_r = max(0, min(self.min_r, row - 2))
-        self.max_r = min(BOARD_ROWS - 1, max(self.max_r, row + 2))
+        self.max_r = min(config.BOARD_ROWS - 1, max(self.max_r, row + 2))
         self.min_c = max(0, min(self.min_c, col - 2))
-        self.max_c = min(BOARD_COLS - 1, max(self.max_c, col + 2))
+        self.max_c = min(config.BOARD_COLS - 1, max(self.max_c, col + 2))
 
 
 class BoardEncoder:
@@ -49,13 +57,13 @@ class BoardEncoder:
     def encode_board(board: Board, current_player: Cell = None) -> np.ndarray:
         """
         Encode board state into multi-channel representation
-        Returns: 4-channel array (BOARD_ROWS, BOARD_COLS, 4)
+        Returns: 4-channel array (config.BOARD_ROWS, config.BOARD_COLS, 4)
         - Channel 0: Current player pieces (1 where player has piece, 0 otherwise)
         - Channel 1: Opponent pieces (1 where opponent has piece, 0 otherwise)
         - Channel 2: Empty cells (1 where empty, 0 otherwise)
         - Channel 3: Current player indicator (all 1s if X, all 0s if O)
         """
-        encoded = np.zeros((BOARD_ROWS, BOARD_COLS, 4), dtype=np.float32)
+        encoded = np.zeros((config.BOARD_ROWS, config.BOARD_COLS, 4), dtype=np.float32)
         
         cells_2d = board.visualize()
         
@@ -125,15 +133,15 @@ class GameState:
         self.board = Board()
         self.move_history = []
         self.play_ranges = [PlayRange(
-            max(0, BOARD_ROWS // 2 - 2),
-            min(BOARD_ROWS - 1, BOARD_ROWS // 2 + 2),
-            max(0, BOARD_COLS // 2 - 2),
-            min(BOARD_COLS - 1, BOARD_COLS // 2 + 2)
+            max(0, config.BOARD_ROWS // 2 - 2),
+            min(config.BOARD_ROWS - 1, config.BOARD_ROWS // 2 + 2),
+            max(0, config.BOARD_COLS // 2 - 2),
+            min(config.BOARD_COLS - 1, config.BOARD_COLS // 2 + 2)
         )]  # Start center-ish
     
     def _index_to_coords(self, idx: int) -> Tuple[int, int]:
         """Convert 1D index to 2D coordinates"""
-        return idx // BOARD_COLS, idx % BOARD_COLS
+        return idx // config.BOARD_COLS, idx % config.BOARD_COLS
     
     def get_current_player(self) -> Cell:
         """Determine current player from move count"""
@@ -198,7 +206,7 @@ class GameState:
                     if dr == 0 and dc == 0:
                         continue
                     nr, nc = r + dr, c + dc
-                    if 0 <= nr < BOARD_ROWS and 0 <= nc < BOARD_COLS:
+                    if 0 <= nr < config.BOARD_ROWS and 0 <= nc < config.BOARD_COLS:
                         if board_2d[nr, nc] != Cell.Empty:
                             return True
             return False
@@ -209,7 +217,7 @@ class GameState:
 
 def is_valid_pos(r: int, c: int) -> bool:
     """Check if position is within board bounds"""
-    return 0 <= r < BOARD_ROWS and 0 <= c < BOARD_COLS
+    return 0 <= r < config.BOARD_ROWS and 0 <= c < config.BOARD_COLS
 
 
 def evaluate(game_state: GameState) -> int:
@@ -223,8 +231,8 @@ def evaluate(game_state: GameState) -> int:
     board_2d = game_state.board.visualize()
     directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
     
-    for r in range(BOARD_ROWS):
-        for c in range(BOARD_COLS):
+    for r in range(config.BOARD_ROWS):
+        for c in range(config.BOARD_COLS):
             cell_type = board_2d[r, c]
             if cell_type == Cell.Empty:
                 continue
@@ -252,13 +260,13 @@ def evaluate(game_state: GameState) -> int:
                 
                 # Score this pattern
                 current_score = 0
-                if count >= WIN:
+                if count >= config.WIN:
                     current_score = EVAL_WIN_BASE
-                elif count == WIN - 1:
+                elif count == config.WIN - 1:
                     current_score = SCORE_OPEN_4 if open_ends == 2 else (SCORE_CLOSED_4 if open_ends == 1 else 0)
-                elif count == WIN - 2:
+                elif count == config.WIN - 2:
                     current_score = SCORE_OPEN_3 if open_ends == 2 else (SCORE_CLOSED_3 if open_ends == 1 else 0)
-                elif count == WIN - 3:
+                elif count == config.WIN - 3:
                     current_score = SCORE_OPEN_2 if open_ends == 2 else (SCORE_CLOSED_2 if open_ends == 1 else 0)
                 elif count == 1 and open_ends == 2:
                     current_score = SCORE_OPEN_1
@@ -318,15 +326,12 @@ def get_best_move(game_state: GameState, depth: int = 4) -> Tuple[int, int]:
     """
     moves = game_state.get_ordered_moves()
     if not moves:
-        return BOARD_SIZE // 2, 0
+        return config.BOARD_SIZE // 2, 0
     
     best_move = moves[0]
     max_eval = EVAL_MIN
     alpha = EVAL_MIN
     beta = EVAL_MAX
-    
-    print(f"Thinking (Depth {depth})... ", end="", flush=True)
-    start_time = time.time()
     
     for move in moves:
         game_state.make_move(move)
@@ -335,7 +340,6 @@ def get_best_move(game_state: GameState, depth: int = 4) -> Tuple[int, int]:
         
         # Found a forced win?
         if eval_score >= EVAL_WIN_BASE:
-            print(f"Winning move found! (Score: {eval_score})")
             best_move = move
             max_eval = eval_score
             break
@@ -346,16 +350,13 @@ def get_best_move(game_state: GameState, depth: int = 4) -> Tuple[int, int]:
         
         alpha = max(alpha, eval_score)
     
-    elapsed = (time.time() - start_time) * 1000
-    print(f"Done in {elapsed:.1f}ms. (Eval: {max_eval})")
-    
     return best_move, max_eval
 
 
 def play_game(depth: int = 4):
     """Main game loop for human vs AI"""
     game_state = GameState()
-    print(f"Gomoku AI (Depth: {depth}, Board: {BOARD_ROWS}x{BOARD_COLS}, Win: {WIN})")
+    print(f"Gomoku AI (Depth: {depth}, Board: {config.BOARD_ROWS}x{config.BOARD_COLS}, Win: {config.WIN})")
     print("You are 'X'. Enter moves as 'row col' or single index.")
     print()
     
@@ -388,7 +389,7 @@ def play_game(depth: int = 4):
                     elif len(parts) == 2:
                         # Row col input
                         r, c = map(int, parts)
-                        move = r * BOARD_COLS + c
+                        move = r * config.BOARD_COLS + c
                     else:
                         print("Invalid input. Enter 'row col' or index.")
                         continue
@@ -403,8 +404,8 @@ def play_game(depth: int = 4):
         else:
             # AI player
             move, eval_score = get_best_move(game_state, depth)
-            row = move // BOARD_COLS
-            col = move % BOARD_COLS
+            row = move // config.BOARD_COLS
+            col = move % config.BOARD_COLS
             print(f"AI plays: {row} {col} (index: {move})")
             game_state.make_move(move)
         

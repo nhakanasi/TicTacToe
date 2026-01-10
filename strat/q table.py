@@ -1,7 +1,9 @@
+import os
 import numpy as np
 import typing
 import pickle
-from encode import Board, Cell, Result, BOARD_ROWS, BOARD_COLS, BOARD_SIZE, WIN
+from strat.encode import Board, Cell, Result
+from strat import config
 
 def getAllStateImpl(currentboard: Board, currentsymbol: Cell, allstates):
     for move in currentboard.get_valid_moves():
@@ -132,7 +134,7 @@ class Player:
         
         values = []
         for hash_val, move in zip(next_boards, next_moves):
-            values.append((self.estimations[hash_val], move))
+            values.append((self.estimations.get(hash_val, 0.0), move))
         np.random.shuffle(values)
         values.sort(key=lambda x: x[0], reverse=True)
         move = values[0][1]
@@ -141,12 +143,13 @@ class Player:
     
     def save_policy(self):
         symbol_name = 'first' if self.symbol == Cell.X else 'second'
-        with open(f'policy_{symbol_name}.bin', 'wb') as f:
+        os.makedirs('policy', exist_ok=True)
+        with open(f'policy/policy_{symbol_name}.bin', 'wb') as f:
             pickle.dump(self.estimations, f)
 
     def load_policy(self):
         symbol_name = 'first' if self.symbol == Cell.X else 'second'
-        with open(f'policy_{symbol_name}.bin', 'rb') as f:
+        with open(f'policy/policy_{symbol_name}.bin', 'rb') as f:
             self.estimations = pickle.load(f)
 
 class HumanPlayer:
@@ -167,16 +170,16 @@ class HumanPlayer:
         self.board.print()
         while True:
             try:
-                coord_input = input(f"Input your position (row col) [0-{BOARD_ROWS-1}] [0-{BOARD_COLS-1}]: ")
+                coord_input = input(f"Input your position (row col) [0-{config.BOARD_ROWS-1}] [0-{config.BOARD_COLS-1}]: ")
                 row, col = map(int, coord_input.split())
-                if 0 <= row < BOARD_ROWS and 0 <= col < BOARD_COLS:
-                    move = row * BOARD_COLS + col
+                if 0 <= row < config.BOARD_ROWS and 0 <= col < config.BOARD_COLS:
+                    move = row * config.BOARD_COLS + col
                     if self.board.isValid(move):
                         return move, self.symbol
                     else:
                         print("Position already taken. Try again.")
                 else:
-                    print(f"Invalid coordinates. Use values between 0 and {BOARD_ROWS-1}")
+                    print(f"Invalid coordinates. Use values between 0 and {config.BOARD_ROWS-1}")
             except (ValueError, IndexError):
                 print("Invalid input. Use format: row col")
 

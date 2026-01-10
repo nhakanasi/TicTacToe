@@ -13,11 +13,19 @@ Based on the approach in https://arxiv.org/pdf/2212.12252
 import numpy as np
 import pickle
 import os
+import sys
+
+# Add parent directory to path so this file can be run directly
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 from typing import List, Tuple, Optional
 try:
-    from .encode import Board, Cell, Result, BOARD_ROWS, BOARD_COLS, WIN
+    from .encode import Board, Cell, Result
+    from . import config
 except ImportError:
-    from encode import Board, Cell, Result, BOARD_ROWS, BOARD_COLS, WIN
+    from encode import Board, Cell, Result
+    import config
 
 
 class TDTicTacToe:
@@ -53,13 +61,13 @@ class TDTicTacToe:
         """Count total number of sequences in board using existing logic."""
         count = 0
         # Horizontal sequences
-        count += BOARD_ROWS * (BOARD_COLS - WIN + 1)
+        count += config.BOARD_ROWS * (config.BOARD_COLS - config.WIN + 1)
         # Vertical sequences
-        count += BOARD_COLS * (BOARD_ROWS - WIN + 1)
+        count += config.BOARD_COLS * (config.BOARD_ROWS - config.WIN + 1)
         # Diagonal sequences
-        count += (BOARD_ROWS - WIN + 1) * (BOARD_COLS - WIN + 1)
+        count += (config.BOARD_ROWS - config.WIN + 1) * (config.BOARD_COLS - config.WIN + 1)
         # Anti-diagonal sequences
-        count += (BOARD_ROWS - WIN + 1) * (BOARD_COLS - WIN + 1)
+        count += (config.BOARD_ROWS - config.WIN + 1) * (config.BOARD_COLS - config.WIN + 1)
         return count
     
     def extract_features(self, board: Board) -> np.ndarray:
@@ -88,10 +96,10 @@ class TDTicTacToe:
             
             if seq_sum > 0:
                 # X-favorable: scale by number of X's
-                features[i] = seq_sum / WIN  # Normalize to [0, 1)
+                features[i] = seq_sum / config.WIN  # Normalize to [0, 1)
             elif seq_sum < 0:
                 # O-favorable: scale by number of O's
-                features[i] = seq_sum / WIN  # Normalize to [-1, 0)
+                features[i] = seq_sum / config.WIN  # Normalize to [-1, 0)
             else:
                 # Empty sequence
                 features[i] = 0
@@ -334,7 +342,7 @@ class TDTrainer:
     
     def train(self, num_training_samples: int = 1000, epsilon_start: float = 0.2,
               epsilon_end: float = 0.01, epsilon_decay: float = 0.995,
-              eval_interval: int = 100):
+              eval_interval: int = 100, verbose: bool = True):
         """
         Train both agents following paper's pseudocode with exploration decay.
         
@@ -354,22 +362,28 @@ class TDTrainer:
             epsilon_end: Minimum exploration rate (exploration floor)
             epsilon_decay: Multiplicative decay factor per game (e.g., 0.995 = 0.5% decay)
             eval_interval: Interval for evaluation printout
+            verbose: Whether to print progress information
         """
-        print("=" * 70)
-        print("TD Learning Training (Paper Pseudocode Implementation)")
-        print("=" * 70)
-        print(f"Target training games: {num_training_samples}")
-        print(f"Exploration schedule:")
-        print(f"  - Start epsilon: {epsilon_start}")
-        print(f"  - End epsilon:   {epsilon_end}")
-        print(f"  - Decay factor:  {epsilon_decay} (per game)")
-        print(f"Learning rate (alpha): {self.agent_x.learning_rate}")
-        print(f"Discount factor (gamma): {self.agent_x.discount_factor}")
-        print("=" * 70)
-        print()
+        if verbose:
+            print("=" * 70)
+            print("TD Learning Training (Paper Pseudocode Implementation)")
+            print("=" * 70)
+        print(f"Target training games: {num_training_samples}", flush=True)
+        print(f"Exploration schedule:", flush=True)
+        if verbose:
+            print(f"  - Start epsilon: {epsilon_start}")
+            print(f"  - End epsilon:   {epsilon_end}")
+            print(f"  - Decay factor:  {epsilon_decay} (per game)")
+            print(f"Learning rate (alpha): {self.agent_x.learning_rate}")
+            print(f"Discount factor (gamma): {self.agent_x.discount_factor}")
+            print("=" * 70)
+            print()
         
         # Initialize epsilon for exploration decay
         epsilon = epsilon_start
+        
+        # Progress tracking
+        progress_interval = max(1, num_training_samples // 10)
         
         # Line 1: while trainGamesCount != n do
         for game_num in range(num_training_samples):
@@ -379,23 +393,28 @@ class TDTrainer:
             # Decay epsilon after each game: epsilon ← max(epsilon_end, epsilon * decay)
             epsilon = max(epsilon_end, epsilon * epsilon_decay)
             
+            # Always show progress every 10%
+            if (game_num + 1) % progress_interval == 0:
+                print(f"  TD Training: {game_num + 1}/{num_training_samples} games ({100*(game_num+1)//num_training_samples}%)", flush=True)
+            
             # Periodic evaluation
-            if (game_num + 1) % eval_interval == 0:
+            if verbose and (game_num + 1) % eval_interval == 0:
                 print(f"Games completed: {game_num + 1:5d}/{num_training_samples}")
                 print(f"  Agent X - Wins: {self.num_wins:4d}, Losses: {self.num_losses:4d}, Draws: {self.num_draws:4d}")
                 print(f"  Current epsilon: {epsilon:.6f}")
                 print(f"  Weight vector W - shape: {self.agent_x.weights.shape}")
                 print()
         
-        print("=" * 70)
-        print("Training Complete!")
-        print(f"Final Results:")
-        print(f"  Agent X Wins:   {self.num_wins}")
-        print(f"  Agent X Losses: {self.num_losses}")
-        print(f"  Agent X Draws:  {self.num_draws}")
-        print(f"  Total games:    {self.num_wins + self.num_losses + self.num_draws}")
-        print(f"  Final epsilon:  {epsilon:.6f}")
-        print("=" * 70)
+        if verbose:
+            print("=" * 70)
+            print("Training Complete!")
+            print(f"Final Results:")
+            print(f"  Agent X Wins:   {self.num_wins}")
+            print(f"  Agent X Losses: {self.num_losses}")
+            print(f"  Agent X Draws:  {self.num_draws}")
+            print(f"  Total games:    {self.num_wins + self.num_losses + self.num_draws}")
+            print(f"  Final epsilon:  {epsilon:.6f}")
+            print("=" * 70)
         
         # Line 20: return W, nW, nL, nD
         return (self.agent_x.weights, self.agent_o.weights,
@@ -471,7 +490,7 @@ if __name__ == "__main__":
     )
     
     # Save learned weights
-    agent_x.save(rf"Reinforecedment learning\tictactoe\policy\td_agent_x.pkl_{BOARD_ROWS}_{BOARD_COLS}_{WIN}")
-    agent_o.save(rf"Reinforecedment learning\tictactoe\policy\td_agent_o.pkl_{BOARD_ROWS}_{BOARD_COLS}_{WIN}")
+    agent_x.save(rf"policy/td_agent_x.pkl_{config.BOARD_ROWS}_{config.BOARD_COLS}_{config.WIN}")
+    agent_o.save(rf"policy/td_agent_o.pkl_{config.BOARD_ROWS}_{config.BOARD_COLS}_{config.WIN}")
     
-    print(f"\nWeights saved to: policy/td_agent_x.pkl and model/td_agent_o.pkl_{BOARD_ROWS}_{BOARD_COLS}_{WIN}")
+    print(f"\nWeights saved to: policy/td_agent_x.pkl and model/td_agent_o.pkl_{config.BOARD_ROWS}_{config.BOARD_COLS}_{config.WIN}")
