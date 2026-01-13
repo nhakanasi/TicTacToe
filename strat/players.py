@@ -79,6 +79,7 @@ class Player(Protocol):
 
     def reset(self) -> None: ...
     def set_board(self, board: Board) -> None: ...
+    def set_state(self, board: Board) -> None: ...
     def setSymbol(self, symbol: Cell) -> None: ...
     def act(self) -> Optional[int]: ...
 
@@ -95,6 +96,10 @@ class HumanCLI:
 
     def set_board(self, board: Board) -> None:
         self.board = board
+
+    def set_state(self, board: Board) -> None:
+        # Compatibility: Judger expects set_state
+        self.set_board(board)
 
     def setSymbol(self, symbol: Cell) -> None:
         self.symbol = symbol
@@ -137,6 +142,10 @@ class MCTSAgent:
     def set_board(self, board: Board) -> None:
         self.board = board
 
+    def set_state(self, board: Board) -> None:
+        # Compatibility: Judger expects set_state
+        self.set_board(board)
+
     def setSymbol(self, symbol: Cell) -> None:
         self.symbol = symbol
 
@@ -161,6 +170,10 @@ class TDPolicy:
 
     def set_board(self, board: Board) -> None:
         self.board = board
+
+    def set_state(self, board: Board) -> None:
+        # Compatibility: Judger expects set_state
+        self.set_board(board)
 
     def setSymbol(self, symbol: Cell) -> None:
         self.symbol = symbol
@@ -189,6 +202,10 @@ class MinimaxAgent:
 
     def set_board(self, board: Board) -> None:
         self.board = board
+
+    def set_state(self, board: Board) -> None:
+        # Compatibility: Judger expects set_state
+        self.set_board(board)
 
     def setSymbol(self, symbol: Cell) -> None:
         self.symbol = symbol
@@ -225,6 +242,10 @@ class AlphaBetaAgent:
 
     def set_board(self, board: Board) -> None:
         self.board = board
+
+    def set_state(self, board: Board) -> None:
+        # Compatibility: Judger expects set_state
+        self.set_board(board)
 
     def setSymbol(self, symbol: Cell) -> None:
         self.symbol = symbol
@@ -264,6 +285,10 @@ class HeuristicAgent:
             self.game_state = HeuristicGameState()
             self.game_state.board = board
 
+    def set_state(self, board: Board) -> None:
+        # Compatibility: Judger expects set_state
+        self.set_board(board)
+
     def setSymbol(self, symbol: Cell) -> None:
         self.symbol = symbol
 
@@ -293,6 +318,10 @@ class QTableAgent:
         self.board = board
         if self.qtable_player:
             self.qtable_player.set_state(board)
+
+    def set_state(self, board: Board) -> None:
+        # Compatibility: Judger expects set_state
+        self.set_board(board)
 
     def setSymbol(self, symbol: Cell) -> None:
         self.symbol = symbol
@@ -339,6 +368,10 @@ class MCTSSharedAgent:
         self.board = board
         if self.mcts_player:
             self.mcts_player.set_state(board)
+
+    def set_state(self, board: Board) -> None:
+        # Compatibility: Judger expects set_state
+        self.set_board(board)
 
     def setSymbol(self, symbol: Cell) -> None:
         self.symbol = symbol
